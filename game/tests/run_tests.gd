@@ -7,6 +7,10 @@ const AimState = preload("res://scripts/aim_state.gd")
 const Geo = preload("res://scripts/target_geometry.gd")
 const Config = preload("res://scripts/config.gd")
 const Target = preload("res://scripts/target.gd")
+const Placement = preload("res://scripts/placement.gd")
+const Summary = preload("res://scripts/summary.gd")
+const RunLog = preload("res://scripts/run_log.gd")
+const SpatialSteps = preload("res://scripts/spatial_steps.gd")
 
 var _failures := 0
 
@@ -20,6 +24,10 @@ func _init() -> void:
 	_test_ads_math()
 	_test_hits()
 	_test_median()
+	_test_placement()
+	_test_summary()
+	_test_spatial_steps()
+	_test_session_check()
 	print("FAILED: %d" % _failures if _failures else "ALL TESTS PASSED")
 	quit(1 if _failures else 0)
 
@@ -172,3 +180,161 @@ func _test_pitch_clamp() -> void:
 	_check("pitch clamps up", aim.pitch_deg, 89.0, 0.0)
 	aim.apply_counts(0.0, 1000.0)
 	_check("pitch clamps down", aim.pitch_deg, -89.0, 0.0)
+
+
+func _test_placement() -> void:
+	# A 27 inch 16:9 screen is 59.77 by 33.62 cm.
+	var half := Placement.screen_half_cm(27.0, 16.0 / 9.0)
+	_check("screen half width cm", half.x, 29.886, 0.01)
+	_check("screen half height cm", half.y, 16.811, 0.01)
+	var reach := Placement.screen_visual_half_deg(27.0, 60.0, 16.0 / 9.0)
+	_check("screen reach sideways deg", reach.x, 26.477, 0.01)
+	_check("screen reach up deg", reach.y, 15.652, 0.01)
+	_check("ring 0-2.5", float(Placement.ecc_bin(2.4) == "0-2.5"), 1.0, 0.0)
+	_check("ring 5-10", float(Placement.ecc_bin(5.0) == "5-10"), 1.0, 0.0)
+	_check("ring 20+", float(Placement.ecc_bin(31.0) == "20+"), 1.0, 0.0)
+
+	seed(11)
+	var aim := AimState.new()
+	aim.yaw_deg = 40.0
+	var eye := Vector3(0, 1.7, 0)
+	var settings := {"monitor_diagonal_in": 27.0, "view_distance_cm": 60.0}
+	var drill := {
+		"zones": {"center": 1, "mid": 2, "far": 2}, "vertical_chance": 0.3,
+		"stances": {"stand": 4, "crouch": 1, "prone": 1, "jump": 1, "dropshot": 1},
+	}
+	var on_screen := 0
+	var ring_matches := 0
+	var footing_ok := 0
+	var in_range := 0
+	for i in 400:
+		var p := Placement.place(drill, settings, aim, 110.0, 16.0 / 9.0, eye)
+		on_screen += int(absf(wrapf(p.bearing - aim.yaw_deg, -180.0, 180.0)) < 55.0)
+		ring_matches += int(p.zone == Placement.ecc_bin(p.ecc))
+		footing_ok += int(p.base == 0.0 or p.base >= 1.0)
+		in_range += int(p.in_view and p.distance >= 4.0 and p.distance <= 60.0)
+	_check("placed on screen", on_screen, 400, 0)
+	_check("ring matches measured angle", ring_matches, 400, 0)
+	_check("on the ground or clearly raised", footing_ok, 400, 0)
+	_check("distance in range", in_range, 400, 0)
+
+	var off := {"zones": {"offscreen": 1}, "vertical_chance": 0.0, "stances": {"stand": 1}}
+	var outside := 0
+	for i in 200:
+		var p := Placement.place(off, settings, aim, 110.0, 16.0 / 9.0, eye)
+		outside += int(not p.in_view
+			and absf(wrapf(p.bearing - aim.yaw_deg, -180.0, 180.0)) >= 60.0)
+	_check("off-screen zone is outside the view", outside, 200, 0)
+	var behind := 0
+	for i in 200:
+		behind += int(absf(Placement.off_screen_offset("behind", 110.0)) >= 115.0)
+	_check("behind is well past the screen edge", behind, 200, 0)
+
+
+func _rec(zone: String, stance: String, ecc: float, direction: float, react: float,
+		first_hit: float, kill: float, shots: int, hits: int) -> Dictionary:
+	return {
+		"zone": zone, "stance": stance, "ecc": ecc, "direction": direction, "react": react,
+		"first_shot": first_hit - 20.0 if first_hit >= 0.0 else -1.0, "first_hit": first_hit,
+		"kill": kill, "shots": shots, "hits": hits, "headshots": 0, "stack_index": 0,
+		"offset": 0.0, "height": 0.0, "flick_deg": ecc, "distance": 20.0,
+		"in_view_at_spawn": true, "pre_ads": false, "in_view": 0.0, "ads": 150.0,
+		"first_shot_error": 0.5, "sight": "optic",
+	}
+
+
+func _test_summary() -> void:
+	var recs := [
+		_rec("5-10", "stand", 8.0, 0.0, 200.0, 500.0, 900.0, 10, 6),
+		_rec("5-10", "stand", 9.0, 180.0, 300.0, 700.0, 1300.0, 10, 4),
+		_rec("5-10", "crouch", 7.0, 90.0, 400.0, 800.0, 1000.0, 5, 5),
+		_rec("20+", "prone", 24.0, 0.0, 350.0, -1.0, -1.0, 5, 0),
+	]
+	var s := Summary.stats(recs)
+	_check("summary shots", s.shots, 30, 0)
+	_check("summary hit rate", s.hit_rate, 50.0, 1e-9)
+	_check("summary median react", Config.median(s.stage.react), 325.0, 1e-9)
+	_check("summary median kill", Config.median(s.stage.kill), 1000.0, 1e-9)
+	_check("summary ring react", Config.median(s.zone_react["5-10"]), 300.0, 1e-9)
+	_check("summary ring hits counted", s.zone_hit["5-10"].size(), 3, 0)
+	_check("summary missed target has no first hit", float(s.zone_hit.has("20+")), 0.0, 0.0)
+	_check("summary to the side", s.level.size(), 2, 0)
+	_check("summary above or below", s.steep.size(), 1, 0)
+	_check("summary stand hit-to-kill", Config.median(s.stance_kill["stand"]), 500.0, 1e-9)
+	var text := Summary.run_text(s, "Mixed", 3, 4, 1400.0, 1500.0)
+	_check("summary text names the ring", float("5 to 10 deg" in text), 1.0, 0.0)
+	_check("summary text shows level", float("kills in 1400 ms" in text), 1.0, 0.0)
+	var line := Summary.fight_text(false, 1500.0, [recs[3]])
+	_check("fight text for a loss", float(line.begins_with("LOST") and "0/5 hits" in line), 1.0, 0.0)
+	var row := RunLog.target_row(recs[0], true, "mixed",
+		{"fov": 110.0, "sensitivity": 6.9, "dpi": 800.0}, 1500.0, 1, 0)
+	_check("log row matches its header", row.split(",").size(),
+		RunLog.TARGET_HEADER.split(",").size(), 0)
+
+
+func _test_spatial_steps() -> void:
+	# Stored azimuths run anticlockwise, so a source to the right is 270.
+	_check("step ahead", float(SpatialSteps.snap(0.0, 0.0) == Vector2i(0, 0)), 1.0, 0.0)
+	_check("step to the right", float(SpatialSteps.snap(90.0, 0.0) == Vector2i(270, 0)), 1.0, 0.0)
+	_check("step to the left", float(SpatialSteps.snap(-90.0, 0.0) == Vector2i(90, 0)), 1.0, 0.0)
+	_check("step behind", float(SpatialSteps.snap(180.0, 0.0) == Vector2i(180, 0)), 1.0, 0.0)
+	_check("step snaps to 5 deg", float(SpatialSteps.snap(-2.4, 3.0) == Vector2i(0, 0)), 1.0, 0.0)
+	_check("step wraps", float(SpatialSteps.snap(1.0, 0.0) == Vector2i(0, 0)), 1.0, 0.0)
+	_check("step above", float(SpatialSteps.snap(-50.0, 40.0) == Vector2i(45, 30)), 1.0, 0.0)
+	_check("step below", float(SpatialSteps.snap(20.0, -20.0) == Vector2i(345, -30)), 1.0, 0.0)
+	var missing := 0
+	for ele: int in SpatialSteps.GRID:
+		for azi in range(0, 360, SpatialSteps.GRID[ele]):
+			for v in 3:
+				missing += int(not FileAccess.file_exists(
+					"%s/step%d_azi_%d_ele_%d.wav" % [SpatialSteps.DIR, v, azi, ele]))
+	_check("every stored direction has its sounds", missing, 0, 0)
+	_check("step level near", SpatialSteps.level_db(2.0), 0.0, 1e-9)
+	_check("step level at double distance", SpatialSteps.level_db(10.0), -6.0206, 0.001)
+	_check("step level floor", SpatialSteps.level_db(5000.0), SpatialSteps.MIN_DB, 1e-9)
+
+
+func _test_session_check() -> void:
+	var recs := [
+		_rec("5-10", "stand", 8.0, 0.0, 200.0, 500.0, 900.0, 10, 6),
+		_rec("5-10", "stand", 9.0, 180.0, 300.0, 700.0, 1300.0, 10, 4),
+		_rec("20+", "prone", 24.0, 0.0, 350.0, -1.0, -1.0, 5, 0),
+	]
+	var result := Summary.check_result(recs, 4000.0)
+	_check("check counts kills", result.kills, 2, 0)
+	# 900, 1300 and the 4000 limit for the one not killed: the middle is 1300.
+	_check("check score counts a miss as the limit", result.score, 1300.0, 1e-9)
+	var settings := {"fov": 110.0, "sensitivity": 6.8, "dpi": 800.0}
+	var row := RunLog.check_row(1, true, "optic", settings, result, 1790000000)
+	_check("check row matches its header", row.split(",").size(),
+		RunLog.CHECK_HEADER.split(",").size(), 0)
+	var csv := "\n".join([RunLog.CHECK_HEADER, row,
+		RunLog.check_row(1, false, "optic", settings, result, 1790000100),
+		RunLog.check_row(1, true, "irons", settings, result, 1790000200),
+		RunLog.check_row(1, true, "optic", {"fov": 100.0, "sensitivity": 6.8, "dpi": 800.0},
+			result, 1790000300),
+		RunLog.check_row(2, true, "optic", settings, result, 1790000400), ""])
+	var earlier := RunLog.earlier_checks(csv, 1, "optic", 110.0)
+	_check("only cold checks at the same sight, FOV and version compare", earlier.size(), 1, 0)
+	_check("earlier check keeps its score", earlier[0].score, 1300.0, 1e-9)
+	var text := Summary.check_text(result, earlier, "the red dot", 110.0, 4000.0, true)
+	_check("check text shows the score and history",
+		float("Typical time to kill: 1300 ms" in text and "best so far" in text), 1.0, 0.0)
+	# Every step of the fixed sequence must be something placement understands.
+	var drill := Config.load_json("res://drills/check.json")
+	var bad := 0
+	for step: Array in drill.sequence:
+		var known: bool = Placement.VISUAL_ZONES.has(step[0]) or step[0] in ["offscreen", "behind"]
+		bad += int(not known or not step[1] in Target.STANCES)
+	_check("check sequence is valid", bad, 0, 0)
+	_check("check sequence length", drill.sequence.size(), 16, 0)
+	# The same seed must give the same placement.
+	var aim := AimState.new()
+	var spec := {"zones": {"far": 1}, "stances": {"stand": 1}, "vertical_chance": 0.0}
+	var s2 := {"monitor_diagonal_in": 34.0, "view_distance_cm": 60.0}
+	seed(123)
+	var a := Placement.place(spec, s2, aim, 110.0, 21.0 / 9.0, Vector3(0, 1.7, 0))
+	seed(123)
+	var b := Placement.place(spec, s2, aim, 110.0, 21.0 / 9.0, Vector3(0, 1.7, 0))
+	randomize()
+	_check("seeded placement repeats", absf(a.bearing - b.bearing) + absf(a.distance - b.distance), 0.0, 1e-9)

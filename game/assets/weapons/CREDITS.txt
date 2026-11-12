@@ -10,3 +10,7 @@ mp5/
   (as mp5_pbr_high_poly.zip).
   Licence: described as CC0 (public domain) in the recommendation that led to it.
   Not checked against the Fab listing; confirm there before sharing the trainer.
+
+Other assets
+  Sky: see ../sky/LICENCE.txt
+  Dummy-head impulse responses (SADIE II, Apache-2.0): see ../hrtf/LICENCE.txt

@@ -1,0 +1,12 @@
+sadie_ku100_48k/
+  Head-related impulse responses for the Neumann KU100 dummy head (subject D1),
+  48 kHz, 256 taps, from the SADIE II database, University of York
+  (https://www.york.ac.uk/sadie-project/database.html; files from
+  https://zenodo.org/records/10886409, D1.zip, downloaded 2026-11-12).
+  Licence: Apache License 2.0.
+  Files were renamed (azi_<degrees>_ele_<degrees>.wav) and only a subset is
+  kept: every 5 degrees around at ear level, every 15 degrees at 30 degrees
+  above and below. Azimuth runs anticlockwise: 90 is to the listener's left.
+
+These are used offline by tools_render_footsteps.gd to make the directional
+footstep sounds in assets/audio/footsteps_hrtf/.
