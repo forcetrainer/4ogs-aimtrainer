@@ -143,6 +143,36 @@ appears during play: numbers during training are distracting noise.
       - Real buildings. The downloaded factory facade is a kit of wall and
         window parts that has to be assembled; the blocks are stand-ins.
       - Ground variety (markings, stains, patches) to break up the tarmac.
+- [~] **Generated arenas.** First version built 2026-11-12 (cover layout
+      only): `Cover.generate(seed)` makes a layout, every practice run
+      gets a new one, the session check keeps the fixed layout (seed 0),
+      and the seed is saved with each target and each run
+      (`arena_seed`). Rules checked by tests over 300 arenas: six to
+      eight tall pieces with one on every side, three to five low pieces,
+      all 12 to 31 m out, none within 15 degrees of another as the player
+      sees it. Two examples in `docs/screens/arena_a.png` and
+      `arena_b.png`. Not yet played. Still to do: raised positions to
+      replace the pedestals, a way to replay a seed from the menu, and
+      themes. Raised by the player: variation
+      helps. Practising in one fixed yard risks learning that yard (where
+      the walls are, which corners enemies come from) instead of the
+      skill; varied practice transfers better. Design as agreed so far:
+      - Practice drills get a new layout each run, built from a seed:
+        which pieces of cover, where, how many, and where the raised
+        positions are. The seed is saved with the run so a layout can be
+        replayed.
+      - The session check always uses one fixed layout, or it stops being
+        comparable from day to day.
+      - A layout is generated from rules, not at random: open sight lines
+        from the middle, cover at mixed distances, tall cover spread round
+        the player so enemies can step out in any direction, and raised
+        spots (rooftop edge, window, container top) to replace the
+        pedestals.
+      - `cover.gd` already describes cover as data that both the drawing
+        and the geometry read, so a generator only has to produce that
+        list.
+      - Later: themes (yard, street, interior) once there is an
+        environment kit to build them from.
 - [ ] Enemy models in place of capsules
 - [~] Targets that are already present or lean out, instead of popping in.
       Only meaningful once there is cover. This is where "I didn't see him"
@@ -162,7 +192,50 @@ appears during play: numbers during training are distracting noise.
 
 After the world, because footsteps should come from places an enemy could be.
 
-- [ ] Footsteps as the cue for off-screen enemies, replacing the red edge bars
+- [~] **Gunfire and hit confirmation.** Built 2026-11-12, ahead of the
+      rest of this step, because the player asked for it: bad sound is one
+      of the things they dislike most in aim trainers, and gunfire matters
+      because sound interrupts visual attention. Measured at the output;
+      **not yet heard by a person**, so every level and the character of
+      the hit sound are first guesses to tune by ear.
+      - `game/scripts/gun_audio.gd` plays it all. Own gunfire is three
+        single shots cut from a close recording of a 9 mm submachine gun
+        (Carl Gustav M45, The Free Firearm Sound Library, CC0), with small
+        changes of pitch and level per shot.
+      - Hit, headshot and kill sounds are made in code: a dry knock that
+        drops in pitch plus a burst of noise, with a bright ping added for
+        headshots and kills. Deliberately not a real-world sound.
+      - Enemies in practice drills shoot back in short bursts, starting a
+        quarter of a second after they come into sight. The shots come
+        from a mid-distance recording of the same gun rendered for every
+        10 degrees round a dummy head, so they are heard from where the
+        enemy is. The session check stays silent on the enemy side.
+      - The hit marker is four strokes round the crosshair, white for a
+        hit and larger and red for a kill.
+      - `game/tests/tools_make_gunfire.gd` makes the sound files;
+        `game/tests/gunfire_check.gd` checks they reach the output.
+      - Second pass after the player listened (2026-11-12). The hit and
+        kill sounds "beeped": they were built round a steady tone. They
+        are now thwacks made only of noise bands, a click and a fast
+        falling thump, with the kill a heavier double knock. The gun
+        sounded thin and suppressed with no ambience, so each shot now
+        also plays a low punch and the distant report as a tail, and all
+        gunfire goes through a mixer channel with more low end, an echo
+        timed to the yard wall and a short reverb.
+      - Third pass the same day: the kill's double knock read as two
+        shots, so it is now one heavy thud, with a separate headshot kill
+        that adds a short high tink. Echo on the player's own shots was
+        cut right back after a single shot sounded too echoing. The
+        player then judged the set "good for now" and enemy fire "really
+        good". Levels are still open to tuning.
+      - `run_sound_preview.bat` plays each sound on a key press, for
+        tuning by ear without playing a run.
+      - Still to do: bolt and handling sounds, bullet impacts on cover,
+        and more than three shot variants. If the made-up thwack still
+        misses, switch to a recorded impact sound.
+- [ ] Footsteps as the cue for off-screen enemies, replacing the red edge bars.
+      Enemy gunfire now also gives direction, so decide whether the red
+      bars can go once both are heard.
 - [ ] Front/back and left/right direction practice in short blocks with
       active turning
 

@@ -10,11 +10,12 @@ const Style = preload("res://scripts/ui/style.gd")
 signal resume_pressed
 signal quit_pressed
 
-const MARKER_USEC := 80_000
+const MARKER_USEC := 90_000
+const KILL_MARKER_USEC := 220_000
 const DAMAGE_USEC := 250_000
 const CUE_USEC := 350_000
 
-var hit_marker: Label
+var hit_marker: HitMarker
 var crosshair: ColorRect
 var cue_left: ColorRect
 var cue_right: ColorRect
@@ -56,9 +57,8 @@ func _ready() -> void:
 	crosshair.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_root.add_child(crosshair)
 
-	hit_marker = Label.new()
-	hit_marker.text = "x"
-	hit_marker.add_theme_font_size_override("font_size", 26)
+	hit_marker = HitMarker.new()
+	hit_marker.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hit_marker.visible = false
 	_root.add_child(hit_marker)
 
@@ -87,7 +87,7 @@ func _layout() -> void:
 	cue_right.position = Vector2(size.x - 22, size.y * 0.25)
 	cue_right.size = Vector2(22, size.y * 0.5)
 	crosshair.position = size / 2.0 - crosshair.size / 2.0
-	hit_marker.position = size / 2.0 + Vector2(12, -30)
+	hit_marker.position = size / 2.0
 
 
 # ---------- panels between runs ----------
@@ -170,8 +170,13 @@ func _spacer(height: float) -> Control:
 
 # ---------- during play ----------
 
-func hit(now_usec: int) -> void:
-	_marker_until_usec = now_usec + MARKER_USEC
+## Show the hit marker: four short strokes round the crosshair, white for
+## a hit and red and larger for a kill.
+func hit(now_usec: int, kill := false) -> void:
+	hit_marker.color = Color(1.0, 0.16, 0.12) if kill else Color(1, 1, 1)
+	hit_marker.reach = 13.0 if kill else 8.0
+	hit_marker.queue_redraw()
+	_marker_until_usec = now_usec + (KILL_MARKER_USEC if kill else MARKER_USEC)
 
 
 func damage(now_usec: int) -> void:
@@ -192,3 +197,14 @@ func update(now_usec: int, crosshair_visible: bool) -> void:
 	if now_usec >= _cue_until_usec:
 		cue_left.visible = false
 		cue_right.visible = false
+
+
+## Four diagonal strokes round the centre of the screen.
+class HitMarker extends Control:
+	var color := Color(1, 1, 1)
+	var reach := 8.0
+
+	func _draw() -> void:
+		for d: Vector2 in [Vector2(1, 1), Vector2(1, -1), Vector2(-1, 1), Vector2(-1, -1)]:
+			draw_line(d * 5.0, d * (5.0 + reach), Color(0, 0, 0, 0.55), 4.0, true)
+			draw_line(d * 5.0, d * (5.0 + reach), color, 2.0, true)

@@ -9,10 +9,10 @@ const TARGET_HEADER := "unix_time,drill,fov,sensitivity,dpi,enemy_ttk_ms,fight,f
 	"stack_index,zone,stance,offset_deg,visual_angle_deg,direction_deg,height_m," + \
 	"flick_deg,distance_m,in_view_at_spawn," + \
 	"pre_ads,react_ms,in_view_ms,ads_ms,first_shot_ms,first_hit_ms,kill_ms,shots,hits," + \
-	"headshots,first_shot_error_deg,sight,from_cover"
+	"headshots,first_shot_error_deg,sight,from_cover,arena_seed"
 const HISTORY_HEADER := "unix_time,drill,sight,fov,sensitivity,dpi,fights,wins,enemy_ttk_start_ms," + \
 	"enemy_ttk_end_ms,median_react_ms,median_first_shot_ms,median_first_hit_ms," + \
-	"median_kill_ms,hit_rate_pct"
+	"median_kill_ms,hit_rate_pct,arena_seed"
 
 var _file: FileAccess
 
@@ -36,7 +36,7 @@ static func target_row(rec: Dictionary, won: bool, drill_id: String, settings: D
 		str(int(rec.pre_ads)), "%.1f" % rec.react, "%.1f" % rec.in_view, "%.1f" % rec.ads,
 		"%.1f" % rec.first_shot, "%.1f" % rec.first_hit, "%.1f" % rec.kill, str(rec.shots),
 		str(rec.hits), str(rec.headshots), "%.2f" % rec.first_shot_error, rec.sight,
-		str(int(rec.get("from_cover", false)))])
+		str(int(rec.get("from_cover", false))), str(rec.get("arena_seed", 0))])
 
 
 func write_target(rec: Dictionary, won: bool, drill_id: String, settings: Dictionary,
@@ -51,11 +51,12 @@ func write_target(rec: Dictionary, won: bool, drill_id: String, settings: Dictio
 static func history_row(drill_id: String, sight: String, settings: Dictionary, fights: int,
 		wins: int, ttk_start: float, ttk_end: float, stats: Dictionary, unix_time: int) -> String:
 	var stage: Dictionary = stats.stage
-	return "%d,%s,%s,%s,%s,%s,%d,%d,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.1f" % [
+	return "%d,%s,%s,%s,%s,%s,%d,%d,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.1f,%d" % [
 		unix_time, drill_id, sight, str(settings.fov),
 		str(settings.sensitivity), str(settings.dpi), fights, wins, ttk_start, ttk_end,
 		Config.median(stage.react), Config.median(stage.first_shot),
-		Config.median(stage.first_hit), Config.median(stage.kill), stats.hit_rate]
+		Config.median(stage.first_hit), Config.median(stage.kill), stats.hit_rate,
+		stats.get("arena_seed", 0)]
 
 
 ## Past runs of one drill with the same sight and FOV, oldest first, as

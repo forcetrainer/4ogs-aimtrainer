@@ -1,0 +1,13 @@
+Gunfire in this folder is made from two recordings of a Carl Gustav M45
+(a 9 mm submachine gun) in The Free Firearm Sound Library by Ben Jaszczak,
+Brian Nelson, Kevin Heras and Matthew Nanney, released under CC0 (no rights
+reserved; no credit required).
+
+Downloaded 2026-11-12 from
+https://opengameart.org/content/the-free-firearm-sound-library
+as "Prepared SFX Library.7z" (194 MB). Only source/G_31P.wav (close) and
+source/G_20P.wav (mid distance) are kept here.
+
+player_*.wav and enemy_*_azi_*.wav are cut and rendered from those two files
+by tests/tools_make_gunfire.gd. Enemy shots use the SADIE II dummy-head
+impulse responses in assets/hrtf (Apache-2.0).

@@ -33,6 +33,11 @@ var base_height := 0.0
 ## when it comes into sight.
 var seen := true
 
+## When this enemy next fires at the player, and how many shots remain in
+## its current burst. Driven by the drill.
+var next_fire_usec := 0
+var burst_left := 0
+
 var _peek_center := 0.0
 var _peek_side := 0.0
 var _peek_spot := {}

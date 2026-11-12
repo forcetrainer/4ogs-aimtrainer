@@ -12,6 +12,7 @@ const Summary = preload("res://scripts/summary.gd")
 const RunLog = preload("res://scripts/run_log.gd")
 const SpatialSteps = preload("res://scripts/spatial_steps.gd")
 const Cover = preload("res://scripts/cover.gd")
+const GunAudio = preload("res://scripts/gun_audio.gd")
 
 var _failures := 0
 
@@ -33,6 +34,8 @@ func _init() -> void:
 	_test_monitor_detection()
 	_test_run_history()
 	_test_cover()
+	_test_gun_audio()
+	_test_arena()
 	print("FAILED: %d" % _failures if _failures else "ALL TESTS PASSED")
 	quit(1 if _failures else 0)
 
@@ -454,3 +457,69 @@ func _test_cover() -> void:
 			var gap: float = (Cover.center(layout[i]) - Cover.center(layout[j])).length()
 			clashes += int(gap < 4.0)
 	_check("cover layout: no two pieces overlap", clashes, 0, 0)
+
+
+func _test_gun_audio() -> void:
+	# Stored azimuths run anticlockwise, so an enemy to the right is 270.
+	_check("enemy fire: ahead", GunAudio.snap(0.0), 0, 0)
+	_check("enemy fire: to the right", GunAudio.snap(90.0), 270, 0)
+	_check("enemy fire: to the left", GunAudio.snap(-90.0), 90, 0)
+	_check("enemy fire: behind", GunAudio.snap(180.0), 180, 0)
+	_check("enemy fire: snaps to the nearest 10 degrees", GunAudio.snap(-14.0), 10, 0)
+	_check("enemy fire: full level when close", GunAudio.enemy_level_db(4.0), GunAudio.ENEMY_DB, 1e-9)
+	_check("enemy fire: 6 dB down at double the distance",
+		GunAudio.enemy_level_db(16.0), GunAudio.ENEMY_DB - 6.0206, 1e-3)
+	var hit := GunAudio.thwack_stream(GunAudio.HIT)
+	_check("hit sound length", hit.data.size(), int(GunAudio.HIT.seconds * 48000) * 2, 0)
+	var loud := 0
+	for i in hit.data.size() / 2:
+		loud = maxi(loud, absi(hit.data.decode_s16(i * 2)))
+	_check("hit sound is not silent and does not clip", float(loud > 8000 and loud <= 30000), 1.0, 0.0)
+	var missing := 0
+	for azi in range(0, 360, GunAudio.AZIMUTH_STEP):
+		for v in GunAudio.ENEMY_VARIANTS:
+			missing += int(not FileAccess.file_exists(
+				"res://assets/audio/gunfire/enemy_%d_azi_%d.wav" % [v, azi]))
+	_check("enemy fire: a file for every direction", missing, 0, 0)
+
+
+func _test_arena() -> void:
+	var a := Cover.generate(12345)
+	var b := Cover.generate(12345)
+	var same := a.size() == b.size()
+	for i in mini(a.size(), b.size()):
+		same = same and a[i].kind == b[i].kind and is_equal_approx(a[i].bearing, b[i].bearing) \
+			and is_equal_approx(a[i].distance, b[i].distance)
+	_check("arena: the same seed gives the same arena", float(same), 1.0, 0.0)
+	var other := Cover.generate(54321)
+	var differs: bool = other.size() != a.size() or not is_equal_approx(other[0].bearing, a[0].bearing)
+	_check("arena: another seed gives another arena", float(differs), 1.0, 0.0)
+	# The rules must hold for every arena, so try a few hundred.
+	var crowded := 0
+	var out_of_range := 0
+	var few_tall := 0
+	var empty_side := 0
+	for s in range(1, 301):
+		var pieces := Cover.generate(s)
+		var tall := 0
+		var quadrants := [false, false, false, false]
+		for i in pieces.size():
+			var p: Dictionary = pieces[i]
+			out_of_range += int(p.distance < Cover.NEAR or p.distance > Cover.FAR)
+			if p.tall:
+				tall += 1
+				quadrants[int(p.bearing / 90.0) % 4] = true
+			for j in range(i + 1, pieces.size()):
+				var gap := absf(wrapf(p.bearing - pieces[j].bearing, -180.0, 180.0))
+				crowded += int(gap < Cover.MIN_GAP_DEG)
+		few_tall += int(tall < 6)
+		empty_side += int(quadrants.has(false))
+	_check("arena: no piece hides behind another", crowded, 0, 0)
+	_check("arena: every piece is within range", out_of_range, 0, 0)
+	_check("arena: at least six pieces an enemy can step out from", few_tall, 0, 0)
+	_check("arena: tall cover on every side", empty_side, 0, 0)
+	var s := Summary.stats([_rec("5-10", "stand", 8.0, 0.0, 200.0, 500.0, 900.0, 10, 6)])
+	s["arena_seed"] = 777
+	var row := RunLog.history_row("mixed", "optic", {"fov": 110.0, "sensitivity": 6.9, "dpi": 800.0},
+		20, 14, 1500.0, 1320.0, s, 1790000000)
+	_check("arena: the seed is saved with the run", float(row.ends_with(",777")), 1.0, 0.0)

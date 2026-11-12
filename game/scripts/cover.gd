@@ -41,6 +41,55 @@ static func layout() -> Array:
 	return pieces
 
 
+## Nearest and furthest a generated piece stands from the middle.
+const NEAR := 12.0
+const FAR := 31.0
+## Generated pieces keep at least this many degrees apart as the player
+## sees them, so none hides behind another and sight lines stay open.
+const MIN_GAP_DEG := 15.0
+
+
+## A layout made from a seed: the same seed always gives the same arena.
+## The rules: tall pieces are spread all the way round, one to a sector, so
+## an enemy can step out in any direction; low pieces fill gaps; distances
+## are mixed; and every piece is clear of the others as the player sees it.
+static func generate(arena_seed: int) -> Array:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = arena_seed
+	var pieces := []
+	var tall_count := rng.randi_range(6, 8)
+	var sector := 360.0 / tall_count
+	var turn := rng.randf_range(0.0, 360.0)
+	for i in tall_count:
+		# Keep clear of the sector's edges so neighbours cannot crowd.
+		var bearing := turn + (i + rng.randf_range(0.3, 0.7)) * sector
+		_add(pieces, "wall" if rng.randf() < 0.65 else "crates", bearing,
+			rng.randf_range(NEAR + 1.0, FAR - 2.0))
+	var low_count := rng.randi_range(3, 5)
+	var tries := 0
+	while low_count > 0 and tries < 200:
+		tries += 1
+		var bearing := rng.randf_range(0.0, 360.0)
+		if _clear_of(pieces, bearing):
+			_add(pieces, "barriers" if rng.randf() < 0.6 else "car", bearing,
+				rng.randf_range(NEAR, FAR))
+			low_count -= 1
+	return pieces
+
+
+static func _add(pieces: Array, kind_name: String, bearing: float, distance: float) -> void:
+	var kind: Dictionary = KINDS[kind_name]
+	pieces.append({"kind": kind_name, "bearing": fposmod(bearing, 360.0), "distance": distance,
+		"half": kind.half, "tall": kind.tall})
+
+
+static func _clear_of(pieces: Array, bearing: float) -> bool:
+	for piece: Dictionary in pieces:
+		if absf(wrapf(bearing - piece.bearing, -180.0, 180.0)) < MIN_GAP_DEG:
+			return false
+	return true
+
+
 ## Unit vectors for a piece: `away` points from the middle out through the
 ## piece, `across` points to the right as the player faces it.
 static func away(piece: Dictionary) -> Vector3:

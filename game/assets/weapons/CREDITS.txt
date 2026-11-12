@@ -17,3 +17,4 @@ Other assets
 
 Scenery: see assets/world/LICENCE.txt (Poly Haven, CC0).
 Brand: assets/brand/4ogs-logo.png is the 4OGS team logo, copied from the 4ogs-radios repo.
+Gunfire: see assets/audio/gunfire/LICENCE.txt (The Free Firearm Sound Library, CC0).

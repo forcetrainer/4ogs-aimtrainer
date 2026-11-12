@@ -13,9 +13,8 @@ const Cover = preload("res://scripts/cover.gd")
 
 const MODELS := "res://assets/world/models"
 const TEXTURES := "res://assets/world/textures"
-## Half the side of the fenced square, in metres.
-const FENCE_HALF := 46.0
-const PANEL_WIDTH := 1.91
+## Half the side of the walled square, in metres.
+const WALL_HALF := 46.0
 
 
 ## Adds the world to parent. Returns the direction toward the sun.
@@ -35,17 +34,19 @@ static func build(parent: Node) -> Vector3:
 	parent.add_child(ground)
 
 	_buildings(parent, rng)
-	_fence(parent)
+	_perimeter(parent)
 	_props(parent, rng)
-	_cover(parent)
 	return sun_dir
 
 
-## The cover inside the yard, drawn where cover.gd says each piece is, so
-## what the player sees matches what blocks sight and shots.
-static func _cover(parent: Node) -> void:
+## Draws the cover for one arena, where cover.gd says each piece is, so what
+## the player sees matches what blocks sight and shots. Returns the node
+## holding it all; free that node to clear the arena.
+static func build_cover(parent: Node, pieces: Array) -> Node3D:
+	var holder := Node3D.new()
+	parent.add_child(holder)
 	var wall := _surface("concrete_wall_006", Vector3(0.4, 0.4, 0.4), true)
-	for piece: Dictionary in Cover.layout():
+	for piece: Dictionary in pieces:
 		var ground := Cover.away(piece) * float(piece.distance)
 		var across := Cover.across(piece)
 		var away := Cover.away(piece)
@@ -59,19 +60,20 @@ static func _cover(parent: Node) -> void:
 				slab.material_override = wall
 				slab.position = Cover.center(piece)
 				slab.rotation.y = yaw
-				parent.add_child(slab)
+				holder.add_child(slab)
 			"crates":
 				for level in 5:
 					for i in 2:
 						for k in 2:
-							_place(parent, "wooden_military_crate",
+							_place(holder, "wooden_military_crate",
 								ground + across * (i - 0.5) * 1.26 + away * (k - 0.5) * 0.54
 									+ Vector3(0.0, level * 0.47, 0.0), yaw)
 			"barriers":
 				for i in 3:
-					_place(parent, "concrete_road_barrier", ground + across * (i - 1.0) * 1.6, yaw)
+					_place(holder, "concrete_road_barrier", ground + across * (i - 1.0) * 1.6, yaw)
 			"car":
-				_place(parent, "covered_car", ground, yaw + PI / 2.0)
+				_place(holder, "covered_car", ground, yaw + PI / 2.0)
+	return holder
 
 
 ## A material from a Poly Haven texture set. Triplanar mapping lets one
@@ -109,48 +111,20 @@ static func _buildings(parent: Node, rng: RandomNumberGenerator) -> void:
 		parent.add_child(block)
 
 
-static func _find_mesh(node: Node, mesh_name: String) -> MeshInstance3D:
-	if node is MeshInstance3D and node.name == mesh_name:
-		return node
-	for child: Node in node.get_children():
-		var found := _find_mesh(child, mesh_name)
-		if found:
-			return found
-	return null
-
-
-## Chain-link fence around the yard, built from one panel and one post of
-## the modular kit repeated along each side.
-static func _fence(parent: Node) -> void:
-	var path := "%s/modular_chainlink_fence/modular_chainlink_fence.gltf" % MODELS
-	if not ResourceLoader.exists(path):
-		return
-	var kit: Node = (load(path) as PackedScene).instantiate()
-	var per_side := int(ceil(FENCE_HALF * 2.0 / PANEL_WIDTH))
-	for piece: Array in [["modular_chainlink_fence_double", 0.5], ["modular_chainlink_fence_post", 0.0]]:
-		var source := _find_mesh(kit, piece[0])
-		if source == null:
-			continue
-		var box := source.get_aabb()
-		# Move the piece so it sits centred on its own origin, feet on the ground.
-		var centre := Transform3D(Basis.IDENTITY,
-			-Vector3(box.get_center().x, box.position.y, box.get_center().z))
-		var multi := MultiMesh.new()
-		multi.transform_format = MultiMesh.TRANSFORM_3D
-		multi.mesh = source.mesh
-		multi.instance_count = per_side * 4
-		var n := 0
-		for side in 4:
-			var turn := Basis(Vector3.UP, side * PI / 2.0)
-			for i in per_side:
-				var along := -FENCE_HALF + (i + float(piece[1])) * PANEL_WIDTH
-				var place := Transform3D(turn, turn * Vector3(along, 0.0, -FENCE_HALF))
-				multi.set_instance_transform(n, place * centre)
-				n += 1
-		var instance := MultiMeshInstance3D.new()
-		instance.multimesh = multi
-		parent.add_child(instance)
-	kit.free()
+## A solid concrete wall round the yard. (A chain-link fence was tried
+## first: at this distance its fine mesh shimmers and crawls as the view
+## moves, which is distracting in a drill about spotting movement.)
+static func _perimeter(parent: Node) -> void:
+	var wall := _surface("concrete_wall_006", Vector3(0.3, 0.3, 0.3), true)
+	for side in 4:
+		var slab := MeshInstance3D.new()
+		var box := BoxMesh.new()
+		box.size = Vector3(WALL_HALF * 2.0 + 0.5, 3.2, 0.5)
+		slab.mesh = box
+		slab.material_override = wall
+		var turn := Basis(Vector3.UP, side * PI / 2.0)
+		slab.transform = Transform3D(turn, turn * Vector3(0.0, 1.6, -WALL_HALF))
+		parent.add_child(slab)
 
 
 static func _place(parent: Node, id: String, at: Vector3, yaw: float) -> void:

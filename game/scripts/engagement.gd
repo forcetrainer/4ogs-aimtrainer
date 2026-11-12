@@ -24,6 +24,7 @@ const Geo = preload("res://scripts/target_geometry.gd")
 const Target = preload("res://scripts/target.gd")
 const World = preload("res://scripts/world.gd")
 const Cover = preload("res://scripts/cover.gd")
+const GunAudio = preload("res://scripts/gun_audio.gd")
 const Placement = preload("res://scripts/placement.gd")
 const WeaponView = preload("res://scripts/weapon_view.gd")
 const Hud = preload("res://scripts/hud.gd")
@@ -54,6 +55,8 @@ const MAX_ENEMY_TTK_MS := 5000.0
 # measured against. Nothing adapts and nothing shoots back.
 const CHECK_TIMEOUT_MS := 4000.0
 const CHECK_SEED := 20261112
+# How long after coming into sight an enemy starts shooting back.
+const ENEMY_FIRE_DELAY_USEC := 250_000
 # Walking speed of an enemy stepping out from behind cover, in m/s.
 const PEEK_SPEED := 2.2
 
@@ -75,6 +78,7 @@ var state := State.BRIEFING
 var camera: Camera3D
 var weapon_view: WeaponView
 var hud: Hud
+var audio: GunAudio
 var run_log := RunLog.new()
 
 var _sun_dir := Vector3.UP
@@ -89,6 +93,9 @@ var _wait_until_usec := 0
 var _paused := false
 
 var _cover: Array = Cover.layout()
+var _cover_node: Node3D
+## Seed of the arena in use; 0 is the fixed layout the session check uses.
+var _arena_seed := 0
 var _targets: Array = []
 var _fight_recs: Array = []
 var _first_rec := {}
@@ -124,6 +131,8 @@ func _ready() -> void:
 	add_child(hud)
 	hud.resume_pressed.connect(_resume)
 	hud.quit_pressed.connect(_leave)
+	audio = GunAudio.new()
+	add_child(audio)
 	_apply_settings()
 	if dev_show == "":
 		run_log.open()
@@ -222,8 +231,24 @@ func _screenshot_if_requested() -> void:
 
 # ---------- run flow ----------
 
+## Practice gets a new arena every run, so the layout itself cannot be
+## learned. The session check always uses the same fixed one, or its
+## results would not be comparable from day to day.
+func _new_arena() -> void:
+	_arena_seed = 0 if _check else maxi(randi(), 1)
+	if dev_show == "cover":
+		for arg: String in OS.get_cmdline_user_args():
+			if arg.begins_with("--arena="):
+				_arena_seed = int(arg.trim_prefix("--arena="))
+	_cover = Cover.layout() if _arena_seed == 0 else Cover.generate(_arena_seed)
+	if _cover_node:
+		_cover_node.queue_free()
+	_cover_node = World.build_cover(self, _cover)
+
+
 func _start_run() -> void:
 	_clear_targets()
+	_new_arena()
 	_fight_recs.clear()
 	_run_recs.clear()
 	_fights_done = 0
@@ -299,6 +324,7 @@ func _spawn_target(now: int, stack_index: int) -> Dictionary:
 	t.rec = {
 		"t0": now, "stack_index": stack_index, "zone": "", "stance": t.stance,
 		"sight": weapon_view.sight_name(), "from_cover": t.from_cover(),
+		"arena_seed": _arena_seed,
 		"offset": 0.0, "distance": t.distance, "in_view_at_spawn": false,
 		"ecc": -1.0, "direction": -1.0, "height": t.base_height, "flick_deg": 0.0,
 		"pre_ads": false,
@@ -321,6 +347,7 @@ func _mark_seen(t: Node3D, now: int, where := {}) -> void:
 			_aspect(), EYE)
 	var rec: Dictionary = t.rec
 	t.seen = true
+	t.next_fire_usec = now + ENEMY_FIRE_DELAY_USEC
 	rec.t0 = now
 	rec.zone = where.zone
 	rec.ecc = where.ecc
@@ -447,6 +474,7 @@ func _show_summary() -> void:
 		"%s at FOV %d" % [sight_label, settings.fov]),
 		[["SPACE", "ANOTHER RUN"], ["ESC", "MENU"]])
 	if dev_show == "":
+		stats["arena_seed"] = _arena_seed
 		RunLog.append_history(drill_id, run_sight, settings, _fights_done, _wins,
 			_run_start_ttk, settings[_ttk_key()], stats)
 
@@ -571,6 +599,14 @@ func _update_fight(now: int, delta: float) -> void:
 			continue
 		if not t.from_cover() and Cover.blocked(_cover, EYE, t.aim_point()):
 			t.undo_step()
+		if not _check and now >= t.next_fire_usec:
+			# The enemy shoots back in short bursts, heard from where it is.
+			audio.enemy_shot(wrapf(t.bearing - aim.yaw_deg, -180.0, 180.0), t.distance)
+			if t.burst_left <= 0:
+				t.burst_left = randi_range(3, 6)
+			t.burst_left -= 1
+			t.next_fire_usec = now + (95_000 if t.burst_left > 0
+				else int(randf_range(0.25, 0.55) * 1e6))
 		if t.rec.in_view < 0.0 and absf(wrapf(t.bearing - aim.yaw_deg, -180.0, 180.0)) < half:
 			t.rec.in_view = _ms_since(t.rec, now)
 		if _ms_since(t.rec, now) > _fight_ttk:
@@ -618,6 +654,7 @@ func _fire(now: int) -> void:
 	var theta := randf() * TAU
 	var dir := aim.direction(r * cos(theta), r * sin(theta))
 	weapon_view.fired(now)
+	audio.shot()
 
 	if state == State.ACTIVE and not _targets.is_empty():
 		# The shot counts against whichever target the sight is closest to.
@@ -665,7 +702,11 @@ func _apply_hit(t: Node3D, kind: int, now: int) -> void:
 		rec.headshots += 1
 		damage *= weapon.headshot_multiplier
 	t.health -= damage
-	hud.hit(now)
-	if t.health <= 0.0:
+	var killed: bool = t.health <= 0.0
+	hud.hit(now, killed)
+	if killed:
+		audio.kill(kind == Geo.HEAD)
 		rec.kill = _ms_since(rec, now)
 		_remove_target(t)
+	else:
+		audio.hit(kind == Geo.HEAD)
