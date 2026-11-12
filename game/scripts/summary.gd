@@ -104,8 +104,6 @@ static func run_text(s: Dictionary, drill_name: String, wins: int, fights: int,
 		for e: Dictionary in earlier.slice(-6):
 			shown.append("%d" % e.level)
 		lines.append("   %s ms   (%d runs)" % [", ".join(shown), earlier.size()])
-	lines.append("")
-	lines.append("Space = another run    1 / 2 / 3 = change drill     C = session check     Esc = quit")
 	return "\n".join(lines)
 
 
@@ -161,6 +159,4 @@ static func check_text(result: Dictionary, earlier: Array, sight_label: String, 
 		for e: Dictionary in earlier.slice(-5):
 			lines.append("   %s   %s" % [e.date, fmt_ms(e.score)])
 		lines.append("   best so far   %s  (%d checks)" % [fmt_ms(best), earlier.size()])
-	lines.append("")
-	lines.append("Space = start practice     C = repeat the check     Esc = quit")
 	return "\n".join(lines)

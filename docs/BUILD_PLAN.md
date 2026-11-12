@@ -101,6 +101,30 @@ from its first day.
 
 Scenery comes before the things that live in it.
 
+Direction from the player, 2026-11-12: aim trainers are ugly and this one
+should not be. It should have the look and feel of Call of Duty without
+copying it, carry 4OGS branding, and be marked as a 4OGS "side quest"
+(nothing to do with the race team). Nothing but what a game would show
+appears during play: numbers during training are distracting noise.
+
+- [~] **Shell and chrome.** Built 2026-11-12; screens checked from
+      screenshots (`docs/screens/`), not yet clicked through by a person.
+      - `game/scripts/app.gd` is the start scene: splash, main menu
+        (start session, practice, settings, sound test, quit), practice
+        list and settings, over the drill's world turning slowly behind.
+      - `game/scripts/ui/style.gd` holds the look: near-black surfaces,
+        off-white condensed type, and the brand gradient (`#a855f7` purple
+        to `#06b6d4` cyan, from the logo in the `4ogs-radios` repo) kept
+        for accents. Logo copied to `game/assets/brand/`.
+      - During play the screen shows only the crosshair, hit marker,
+        damage flash and off-screen cue. A briefing panel comes before a
+        run and results after it. `Esc` pauses (the target in progress is
+        discarded) and can return to the menu. The old on-screen status
+        text and hotkeys are gone; settings live in the menu.
+      - Open: the type is Bahnschrift (ships with Windows) as a stand-in.
+        The team has brand standards for type that have not been found;
+        swap the font in `style.gd` when they are.
+
 - [ ] Scenery and cover, replacing the empty plain and the grey pillars.
       Makes targets below the player possible.
 - [ ] Enemy models in place of capsules

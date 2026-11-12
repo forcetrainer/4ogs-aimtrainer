@@ -8,24 +8,31 @@ extends Node3D
 ## An enemy "kills you" if it stays alive longer than its time-to-kill; that
 ## time adapts per drill so you win about 70% of fights, and is your level.
 ##
+## Nothing is shown on screen during play except what a game would show.
+## A briefing comes before each run and the numbers come after it.
+##
 ## This file is the drill's flow: fights, input, aiming and firing. The parts
 ## it drives live beside it: placement.gd (where targets appear),
-## weapon_view.gd (the gun on screen), hud.gd (text and markers),
-## summary.gd (results) and run_log.gd (files).
+## weapon_view.gd (the gun on screen), hud.gd (crosshair and panels),
+## summary.gd (results) and run_log.gd (files). app.gd starts it from the
+## menu: set `mode` before adding it to the tree.
 
 const Sens = preload("res://scripts/sens.gd")
 const AimState = preload("res://scripts/aim_state.gd")
 const Config = preload("res://scripts/config.gd")
 const Geo = preload("res://scripts/target_geometry.gd")
 const Target = preload("res://scripts/target.gd")
-const Lighting = preload("res://scripts/lighting.gd")
+const World = preload("res://scripts/world.gd")
 const Placement = preload("res://scripts/placement.gd")
 const WeaponView = preload("res://scripts/weapon_view.gd")
 const Hud = preload("res://scripts/hud.gd")
 const Summary = preload("res://scripts/summary.gd")
 const RunLog = preload("res://scripts/run_log.gd")
 
-enum State { WAITING, ACTIVE, SUMMARY }
+## Emitted when the player leaves for the menu.
+signal exit_to_menu
+
+enum State { BRIEFING, WAITING, ACTIVE, SUMMARY }
 
 const DRILLS := ["mixed", "peripheral", "offscreen"]
 const RUN_LENGTH := 20
@@ -47,13 +54,20 @@ const MAX_ENEMY_TTK_MS := 5000.0
 const CHECK_TIMEOUT_MS := 4000.0
 const CHECK_SEED := 20261112
 
+## What to run: "check" for the session check (followed by practice), or a
+## drill id. Set by the menu before this node enters the tree.
+var mode := "check"
+## Development aid, set by app.gd: jump straight to "play", "results" or
+## "pause" so that screen can be photographed.
+var dev_show := ""
+
 var profile := {}
 var weapon := {}
 var settings := {}
 var drill := {}
 var drill_id := "mixed"
 var aim := AimState.new()
-var state := State.WAITING
+var state := State.BRIEFING
 
 var camera: Camera3D
 var weapon_view: WeaponView
@@ -69,6 +83,7 @@ var _ads_hfov := 90.0
 var _force_ads := false
 var _next_shot_usec := 0
 var _wait_until_usec := 0
+var _paused := false
 
 var _targets: Array = []
 var _fight_recs: Array = []
@@ -89,26 +104,39 @@ func _ready() -> void:
 	profile = Config.load_json("res://profiles/call_of_duty.json")
 	weapon = Config.load_json("res://weapons/mp5.json")
 	settings = Config.load_settings()
-	_detect_monitor(false)
 	Input.use_accumulated_input = false
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
-	_build_world()
+	_sun_dir = World.build(self)
+	camera = Camera3D.new()
+	camera.position = EYE
+	camera.keep_aspect = Camera3D.KEEP_HEIGHT
+	camera.near = 0.03
+	add_child(camera)
+	camera.make_current()
 	weapon_view = WeaponView.new()
 	camera.add_child(weapon_view)
 	weapon_view.setup(weapon, settings.get("optic", true))
 	hud = Hud.new()
 	add_child(hud)
+	hud.resume_pressed.connect(_resume)
+	hud.quit_pressed.connect(_leave)
 	_apply_settings()
 	run_log.open()
-	var args := OS.get_cmdline_user_args()
-	var dev := "--no-check" in args
-	for arg: String in args:
-		dev = dev or arg.begins_with("--screenshot=")
-	if dev:
-		_load_drill(settings.get("drill", "mixed"))
-	else:
+	if mode == "check":
 		_start_check()
-	_screenshot_if_requested()
+	else:
+		_load_drill(mode)
+	match dev_show:
+		"":
+			_screenshot_if_requested()
+		"play":
+			_begin_run(Time.get_ticks_usec())
+			_wait_until_usec = 0
+		"results":
+			_show_summary()
+		"pause":
+			_begin_run(Time.get_ticks_usec())
+			_pause()
 
 
 # ---------- setup ----------
@@ -146,54 +174,8 @@ func _run_length() -> int:
 	return drill.sequence.size() if _check else RUN_LENGTH
 
 
-## True while a check is being taken; settings that would make it
-## incomparable with other checks are locked until it ends.
-func _check_running() -> bool:
-	return _check and state != State.SUMMARY
-
-
 func _ttk_key() -> String:
 	return "enemy_ttk_ms_" + drill_id
-
-
-func _build_world() -> void:
-	_sun_dir = Lighting.build(self)
-
-	var ground := MeshInstance3D.new()
-	var plane := PlaneMesh.new()
-	plane.size = Vector2(200, 200)
-	ground.mesh = plane
-	ground.material_override = _flat_material(Color(0.3, 0.31, 0.28))
-	add_child(ground)
-
-	# Distant blocks give the eye a sense of rotation; targets always spawn nearer.
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 7
-	for i in 28:
-		var angle := rng.randf_range(0.0, TAU)
-		var dist := rng.randf_range(48.0, 85.0)
-		var block := MeshInstance3D.new()
-		var box := BoxMesh.new()
-		box.size = Vector3(rng.randf_range(3, 9), rng.randf_range(2.5, 9), rng.randf_range(3, 9))
-		block.mesh = box
-		var shade := rng.randf_range(0.34, 0.52)
-		block.material_override = _flat_material(Color(shade, shade * 0.97, shade * 0.9))
-		block.position = Vector3(sin(angle) * dist, box.size.y / 2.0, -cos(angle) * dist)
-		add_child(block)
-
-	camera = Camera3D.new()
-	camera.position = EYE
-	camera.keep_aspect = Camera3D.KEEP_HEIGHT
-	camera.near = 0.03
-	add_child(camera)
-	camera.make_current()
-
-
-func _flat_material(color: Color) -> StandardMaterial3D:
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = color
-	mat.roughness = 0.9
-	return mat
 
 
 ## Development aid: "-- --screenshot=<path>" saves one frame and quits. Add
@@ -208,6 +190,7 @@ func _screenshot_if_requested() -> void:
 			path = arg.trim_prefix("--screenshot=")
 	if path == "":
 		return
+	_begin_run(Time.get_ticks_usec())
 	_force_ads = "--ads" in args
 	if "--irons" in args:
 		weapon_view.set_optic(false)
@@ -236,13 +219,27 @@ func _screenshot_if_requested() -> void:
 
 func _start_run() -> void:
 	_clear_targets()
+	_fight_recs.clear()
 	_run_recs.clear()
 	_fights_done = 0
 	_wins = 0
 	_run_start_ttk = settings.get(_ttk_key(), 0.0)
-	hud.hide_summary()
-	hud.set_result("%s. Hold right mouse to aim, hold left mouse to fire" % drill.goal)
-	_begin_wait(Time.get_ticks_usec())
+	state = State.BRIEFING
+	var lines := [drill.goal + "."]
+	if _check:
+		lines.append("Each target has a %d second limit. Your result is saved and compared with earlier checks." % (
+			CHECK_TIMEOUT_MS / 1000.0))
+	else:
+		lines.append("An enemy left alive too long kills you. That time shortens as you win and lengthens as you lose. %d fights." % RUN_LENGTH)
+	lines.append("Hold right mouse to aim, hold left mouse to fire.")
+	hud.show_briefing(drill.name, lines, [["CLICK", "BEGIN"], ["ESC", "MENU"]])
+
+
+func _begin_run(now: int) -> void:
+	hud.hide_panel()
+	# The click that starts the run should not also fire the gun.
+	_next_shot_usec = now + 400_000
+	_begin_wait(now)
 
 
 func _begin_wait(now: int) -> void:
@@ -331,10 +328,6 @@ func _finish_fight(now: int, won: bool) -> void:
 		_run_recs.append(rec)
 		run_log.write_target(rec, won, "check" if _check else drill_id, settings, _fight_ttk,
 			_fights_done)
-	var headline := ""
-	if _check:
-		headline = "KILLED" if won else "OUT OF TIME"
-	hud.set_result(Summary.fight_text(won, _fight_ttk, _fight_recs, headline))
 	if _fights_done >= _run_length():
 		_show_summary()
 	else:
@@ -344,16 +337,17 @@ func _finish_fight(now: int, won: bool) -> void:
 func _show_summary() -> void:
 	state = State.SUMMARY
 	Config.save_settings(settings)
+	var sight_label := "the red dot" if weapon_view.has_optic() else "iron sights"
 	if _check:
 		var version := int(drill.version)
 		var sight := weapon_view.sight_name()
 		var result := Summary.check_result(_run_recs, CHECK_TIMEOUT_MS)
 		var earlier := RunLog.earlier_checks(RunLog.read_checks_file(), version, sight,
 			settings.fov)
-		RunLog.append_check(version, _check_cold, sight, settings, result)
-		hud.show_summary(Summary.check_text(result, earlier,
-			"the red dot" if weapon_view.has_optic() else "iron sights", settings.fov,
-			CHECK_TIMEOUT_MS, _check_cold))
+		if dev_show == "":
+			RunLog.append_check(version, _check_cold, sight, settings, result)
+		hud.show_summary(Summary.check_text(result, earlier, sight_label, settings.fov,
+			CHECK_TIMEOUT_MS, _check_cold), [["SPACE", "START PRACTICE"], ["ESC", "MENU"]])
 		_check_cold = false
 		return
 	var stats := Summary.stats(_run_recs)
@@ -361,15 +355,51 @@ func _show_summary() -> void:
 	var earlier_runs := RunLog.earlier_runs(RunLog.read_history_file(), drill_id, run_sight,
 		settings.fov)
 	hud.show_summary(Summary.run_text(stats, drill.name, _wins, _fights_done,
-		settings[_ttk_key()], _run_start_ttk, earlier_runs, "%s at FOV %d" % [
-			"the red dot" if weapon_view.has_optic() else "iron sights", settings.fov]))
-	RunLog.append_history(drill_id, run_sight, settings, _fights_done, _wins, _run_start_ttk,
-		settings[_ttk_key()], stats)
+		settings[_ttk_key()], _run_start_ttk, earlier_runs,
+		"%s at FOV %d" % [sight_label, settings.fov]),
+		[["SPACE", "ANOTHER RUN"], ["ESC", "MENU"]])
+	if dev_show == "":
+		RunLog.append_history(drill_id, run_sight, settings, _fights_done, _wins,
+			_run_start_ttk, settings[_ttk_key()], stats)
+
+
+# ---------- pause and leaving ----------
+
+## Pausing throws away the fight in progress: its timings would be
+## meaningless, so it is neither counted nor saved, and comes round again.
+func _pause() -> void:
+	_paused = true
+	for t: Node3D in _targets:
+		t.queue_free()
+	_targets.clear()
+	_fight_recs.clear()
+	_stack_at_usec = 0
+	state = State.WAITING
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	hud.show_pause("The target in progress was discarded.")
+
+
+func _resume() -> void:
+	_paused = false
+	hud.hide_panel()
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	_begin_run(Time.get_ticks_usec())
+
+
+func _leave() -> void:
+	Config.save_settings(settings)
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	exit_to_menu.emit()
 
 
 # ---------- input ----------
 
 func _input(event: InputEvent) -> void:
+	if _paused:
+		if event is InputEventKey and event.pressed and not event.echo \
+				and event.keycode == KEY_ESCAPE:
+			_resume()
+		return
 	if event is InputEventMouseMotion:
 		if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
 			return
@@ -396,63 +426,27 @@ func _input(event: InputEvent) -> void:
 						REACTION_RUN_SHARE * _first_rec.flick_deg / aim.deg_per_count)
 					if _first_rec.moved >= needed:
 						_first_rec.react = _react_run_start
-	elif event is InputEventMouseButton:
-		if event.pressed and event.button_index == MOUSE_BUTTON_RIGHT:
+	elif event is InputEventMouseButton and event.pressed:
+		if state == State.BRIEFING and event.button_index == MOUSE_BUTTON_LEFT:
+			_begin_run(Time.get_ticks_usec())
+		elif event.button_index == MOUSE_BUTTON_RIGHT:
 			if state == State.ACTIVE and _first_rec.ads < 0.0:
 				_first_rec.ads = _ms_since(_first_rec, Time.get_ticks_usec())
 	elif event is InputEventKey and event.pressed and not event.echo:
-		var step := 0.5 if event.shift_pressed else 0.05
-		if _check_running() and event.keycode in [KEY_C, KEY_T, KEY_BRACKETLEFT,
-				KEY_BRACKETRIGHT, KEY_COMMA, KEY_PERIOD, KEY_F1, KEY_F2, KEY_F3, KEY_F4, KEY_F5]:
-			return
 		match event.keycode:
 			KEY_ESCAPE:
-				Config.save_settings(settings)
-				get_tree().quit()
+				if state == State.BRIEFING or state == State.SUMMARY:
+					_leave()
+				else:
+					_pause()
 			KEY_SPACE:
-				if state == State.SUMMARY:
+				if state == State.BRIEFING:
+					_begin_run(Time.get_ticks_usec())
+				elif state == State.SUMMARY:
 					if _check:
 						_load_drill(settings.get("drill", "mixed"))
 					else:
 						_start_run()
-			KEY_C:
-				_start_check()
-			KEY_1:
-				_load_drill(DRILLS[0])
-			KEY_2:
-				_load_drill(DRILLS[1])
-			KEY_3:
-				_load_drill(DRILLS[2])
-			KEY_T:
-				weapon_view.set_optic(not weapon_view.has_optic())
-				settings["optic"] = weapon_view.has_optic()
-				Config.save_settings(settings)
-			KEY_F1:
-				settings["monitor_manual"] = true
-				_change("monitor_diagonal_in", clampf(roundf(settings.monitor_diagonal_in) - 1.0, 13.0, 65.0))
-			KEY_F2:
-				settings["monitor_manual"] = true
-				_change("monitor_diagonal_in", clampf(roundf(settings.monitor_diagonal_in) + 1.0, 13.0, 65.0))
-			KEY_F5:
-				_detect_monitor(true)
-			KEY_F3:
-				_change("view_distance_cm", clampf(settings.view_distance_cm - 5.0, 30.0, 150.0))
-			KEY_F4:
-				_change("view_distance_cm", clampf(settings.view_distance_cm + 5.0, 30.0, 150.0))
-			KEY_BRACKETLEFT:
-				_change("sensitivity", clampf(snappedf(settings.sensitivity - step, 0.01), 0.01, 100.0))
-			KEY_BRACKETRIGHT:
-				_change("sensitivity", clampf(snappedf(settings.sensitivity + step, 0.01), 0.01, 100.0))
-			KEY_COMMA:
-				_change("fov", clampf(settings.fov - 5.0, 60.0, 120.0))
-			KEY_PERIOD:
-				_change("fov", clampf(settings.fov + 5.0, 60.0, 120.0))
-
-
-func _change(key: String, value: float) -> void:
-	settings[key] = value
-	_apply_settings()
-	Config.save_settings(settings)
 
 
 # ---------- per frame ----------
@@ -462,17 +456,17 @@ func _process(delta: float) -> void:
 	_update_ads(delta)
 	_update_fire(now)
 
-	if state == State.WAITING and now >= _wait_until_usec:
-		_begin_fight(now)
-	elif state == State.ACTIVE:
-		_update_fight(now, delta)
+	if not _paused:
+		if state == State.WAITING and now >= _wait_until_usec:
+			_begin_fight(now)
+		elif state == State.ACTIVE:
+			_update_fight(now, delta)
 
 	camera.rotation = aim.camera_rotation()
 	camera.fov = Sens.horizontal_to_vertical_fov(_current_hfov(), Placement.FOV_ASPECT)
 	weapon_view.update(delta, now, aim, _ease(_ads_progress), camera.fov)
 	# With iron sights the front post is the aiming mark, so the dot goes away.
 	hud.update(now, weapon_view.has_optic() or _ads_progress < 0.6)
-	hud.set_status(_status_text())
 
 
 func _update_fight(now: int, delta: float) -> void:
@@ -499,9 +493,14 @@ func _current_hfov() -> float:
 	return lerpf(_hip_hfov, _ads_hfov, _ease(_ads_progress))
 
 
+## True while the gun is in the player's hands: not on a panel, not paused.
+func _playing() -> bool:
+	return not _paused and (state == State.WAITING or state == State.ACTIVE)
+
+
 func _update_ads(delta: float) -> void:
 	var step: float = delta * 1000.0 / weapon.ads_time_ms
-	if (Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) or _force_ads) and state != State.SUMMARY:
+	if (Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) and _playing()) or _force_ads:
 		_ads_progress = minf(_ads_progress + step, 1.0)
 	else:
 		_ads_progress = maxf(_ads_progress - step, 0.0)
@@ -509,7 +508,7 @@ func _update_ads(delta: float) -> void:
 
 
 func _update_fire(now: int) -> void:
-	if state == State.SUMMARY or not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+	if not _playing() or not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
 		return
 	if now < _next_shot_usec:
 		return
@@ -567,50 +566,3 @@ func _apply_hit(t: Node3D, kind: int, now: int) -> void:
 	if t.health <= 0.0:
 		rec.kill = _ms_since(rec, now)
 		_remove_target(t)
-
-
-func _status_text() -> String:
-	var reach := Placement.screen_visual_half_deg(settings.monitor_diagonal_in,
-		settings.view_distance_cm, _aspect())
-	var lines := [
-		"%s  [1 / 2 / 3]    fight %d of %d" % [
-			drill.name, mini(_fights_done + 1, RUN_LENGTH), RUN_LENGTH],
-		"Enemy kills in %d ms" % settings[_ttk_key()],
-	]
-	if _check:
-		lines = [
-			"Session check    target %d of %d    [1 / 2 / 3 = skip to practice]" % [
-				mini(_fights_done + 1, _run_length()), _run_length()],
-			"Settings are locked until the check ends",
-		]
-	lines += [
-		"FOV %d  [, / .]    targets look %d%% the size they do at 90" % [
-			settings.fov, 100.0 * Sens.on_screen_scale(settings.fov, 90.0)],
-		"Sensitivity %.2f  [ [ / ] ]    %.1f cm/360" % [
-			settings.sensitivity,
-			Sens.cm_per_360(settings.dpi, profile.yaw_constant, settings.sensitivity)],
-		"Monitor %.0f in (%s) [F1 / F2, F5 = detect] at %d cm [F3 / F4]: screen covers %d deg each side of your vision, %d up and down" % [
-			settings.monitor_diagonal_in,
-			"set by hand" if settings.get("monitor_manual", false) else "detected" if settings.get("monitor_detected_for", "") != "" else "default, not detected",
-			settings.view_distance_cm, reach.x, reach.y],
-		"%s  (placeholder values)    sight: %s  [T]" % [
-			weapon.name, "red dot" if weapon_view.has_optic() else "iron sights"],
-	]
-	return "\n".join(lines)
-
-
-## Use the size the monitor reports about itself, so nobody has to type it
-## in. Asked once per screen resolution (the query takes about a second);
-## `force` asks again and drops a size set by hand.
-func _detect_monitor(force: bool) -> void:
-	var screen := str(DisplayServer.screen_get_size())
-	if not force and (settings.get("monitor_manual", false)
-			or settings.get("monitor_detected_for", "") == screen):
-		return
-	var diagonal: float = Config.detect_monitor_diagonal_in()
-	if diagonal <= 0.0:
-		return
-	settings["monitor_diagonal_in"] = diagonal
-	settings["monitor_manual"] = false
-	settings["monitor_detected_for"] = screen
-	Config.save_settings(settings)

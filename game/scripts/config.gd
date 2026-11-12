@@ -71,3 +71,22 @@ static func detect_monitor_diagonal_in() -> float:
 	if code != 0 or output.is_empty():
 		return -1.0
 	return parse_monitor_query(output[0])
+
+
+## Use the size the monitor reports about itself, so nobody has to type it
+## in. Asked once per screen resolution (the query takes about a second);
+## `force` asks again and drops a size set by hand. Returns true if the
+## setting changed.
+static func refresh_monitor(settings: Dictionary, force: bool) -> bool:
+	var screen := str(DisplayServer.screen_get_size())
+	if not force and (settings.get("monitor_manual", false)
+			or settings.get("monitor_detected_for", "") == screen):
+		return false
+	var diagonal := detect_monitor_diagonal_in()
+	if diagonal <= 0.0:
+		return false
+	settings["monitor_diagonal_in"] = diagonal
+	settings["monitor_manual"] = false
+	settings["monitor_detected_for"] = screen
+	save_settings(settings)
+	return true

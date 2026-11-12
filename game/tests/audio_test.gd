@@ -21,6 +21,11 @@ const SOURCE_DISTANCE := 8.0
 const STEP_INTERVAL := 0.42
 const TRIALS := 12
 
+## Emitted on Esc when the test was opened from the menu.
+signal exited
+## Set by the menu; without it Esc closes the game.
+var embedded := false
+
 var aim := AimState.new()
 var camera: Camera3D
 var steps: SpatialSteps
@@ -191,7 +196,11 @@ func _input(event: InputEvent) -> void:
 			_answer()
 	elif event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_ESCAPE:
-			get_tree().quit()
+			if embedded:
+				Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+				exited.emit()
+			else:
+				get_tree().quit()
 		elif event.keycode == KEY_H and not _done:
 			_hrtf = not _hrtf
 
