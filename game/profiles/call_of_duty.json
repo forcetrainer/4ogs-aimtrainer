@@ -1,0 +1,16 @@
+{
+	"name": "Call of Duty",
+	"title": "Modern Warfare 4",
+	"yaw_constant": 0.0066,
+	"yaw_constant_status": "verified by the user on 2026-11-11: a full turn at in-game sensitivity 6.8 in Modern Warfare 4 matched the trainer by hand measurement",
+	"fov_degrees": 120.0,
+	"fov_convention": "horizontal_at_16_9",
+	"fov_convention_status": "a published FOV table for earlier titles matches the horizontal-at-16:9 formula to rounding; not yet confirmed in Modern Warfare 4",
+	"ads_monitor_coefficient": 1.33,
+	"ads_status": "ADS FOV is modelled as 'Affected' (hip FOV divided by weapon zoom) and ADS sensitivity as 'Relative' with this coefficient, blended gradually over the zoom; the formula is community-derived and unverified in Modern Warfare 4",
+	"target_health": 150.0,
+	"target_health_status": "placeholder from Black Ops 7; Modern Warfare 4 value unknown",
+	"strafe_speed_min": 1.5,
+	"strafe_speed_max": 4.0,
+	"strafe_speed_status": "placeholder; not measured"
+}

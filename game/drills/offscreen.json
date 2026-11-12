@@ -1,0 +1,9 @@
+{
+	"name": "Off screen",
+	"goal": "Targets appear outside the screen or behind you. An edge bar shows the side until sound cues are built",
+	"zones": {"offscreen": 3, "behind": 1},
+	"vertical_chance": 0.0,
+	"stack_chance": 0.3,
+	"stances": {"stand": 3, "crouch": 1, "jump": 1, "dropshot": 1},
+	"start_enemy_ttk_ms": 2000
+}

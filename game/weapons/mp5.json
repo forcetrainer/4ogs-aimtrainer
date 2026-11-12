@@ -1,0 +1,38 @@
+{
+	"name": "MP5",
+	"status": "handling values are placeholders in a typical submachine-gun range; not Modern Warfare 4 data",
+	"ads_time_ms": 200.0,
+	"zoom": 1.3,
+	"rpm": 800.0,
+	"damage": 25.0,
+	"headshot_multiplier": 1.3,
+	"hip_spread_deg": 2.5,
+	"recoil_pitch_deg": 0.18,
+	"recoil_yaw_deg": 0.07,
+	"model": {
+		"note": "Positions are in the model's own space, in metres: +Z is toward the muzzle, +Y is up. An 'eye' is where the camera sits relative to the gun.",
+		"scene": "res://assets/weapons/mp5/source/SM_MP5.fbx",
+		"textures": "res://assets/weapons/mp5/textures/T_MP5",
+		"muzzle": [0.0, 0.1185, 0.44],
+		"viewmodel_fov_vertical_deg": 50.0,
+		"viewmodel_fov_note": "The weapon is drawn with its own fixed field of view, as shooters do, so it keeps the same size and shape whatever the game FOV is. A starting point, not a measured Call of Duty value.",
+		"hip_position": [0.081, -0.202, -0.294],
+		"hip_rotation_deg": [0.0, 8.0, 0.0],
+		"hip_note": "Where the weapon sits in front of the camera when not aiming (metres right, up, back; then pitch, yaw, roll). Posed against a gameplay reference: held high and close, muzzle angled in toward the crosshair.",
+		"irons_eye": [0.0, 0.1795, -0.12],
+		"irons_pitch_deg": 0.35,
+		"irons_note": "Measured from the mesh: rear notch bottom at height 0.178 (z 0.006), front post tip at 0.1765 (z 0.368). The small upward tilt puts the post tip on the aim point.",
+		"optic_mount_surface": 2,
+		"optic_mount_note": "Surface 2 of the mesh is the top rail (top at height 0.1824). It blocks the iron sight line, so it is hidden whenever the optic is off.",
+		"optic": {
+			"scene": "res://assets/weapons/red_dot/crimson_trace_cts-1550_red_dot_sight.glb",
+			"scale": 1.5,
+			"position": [0.0, 0.1824, 0.11],
+			"dot_height": 0.019,
+			"glass_z": 0.0215,
+			"eye_relief": 0.14,
+			"glass_mesh": "CTS_1500_M_Sight_Glass_0",
+			"hide_meshes": ["CTS_1500_Reddot_M_0"]
+		}
+	}
+}

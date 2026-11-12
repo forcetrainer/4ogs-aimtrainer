@@ -1,0 +1,12 @@
+Weapon models
+
+red_dot/crimson_trace_cts-1550_red_dot_sight.glb
+  "Crimson Trace CTS-1550 Red Dot Sight" by Orshia 3D (TalhaHelvaci), from Sketchfab.
+  Licence: Creative Commons Attribution (credit the author).
+  https://sketchfab.com/3d-models/crimson-trace-cts-1550-red-dot-sight-a29f7326e13c454a9de1a027c74dd8ae
+
+mp5/
+  MP5 from the Classic Weapons Pack by Stein Games, downloaded from Fab on 2026-11-11
+  (as mp5_pbr_high_poly.zip).
+  Licence: described as CC0 (public domain) in the recommendation that led to it.
+  Not checked against the Fab listing; confirm there before sharing the trainer.

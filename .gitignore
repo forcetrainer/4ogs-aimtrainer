@@ -1,0 +1,10 @@
+# Godot engine binaries (download Godot 4.7.2 into tools/godot to run)
+tools/
+
+# Godot's import cache; rebuilt automatically
+game/.godot/
+
+# Editor and OS clutter
+*.tmp
+Thumbs.db
+.DS_Store
