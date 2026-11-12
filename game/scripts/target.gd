@@ -29,6 +29,16 @@ var head_height := 1.62
 ## Height of the feet above the ground (standing on a raised platform).
 var base_height := 0.0
 
+## False while the target is still hidden behind cover; its timings start
+## when it comes into sight.
+var seen := true
+
+var _peek_center := 0.0
+var _peek_side := 0.0
+var _peek_spot := {}
+var _peek_speed := 0.0
+var _stepping_out := false
+var _prev_bearing := 0.0
 var _platform: MeshInstance3D
 var _lying := 0.0
 var _dropping := false
@@ -104,6 +114,43 @@ func setup(p_stance: String, p_bearing: float, p_distance: float, p_health: floa
 	update(0.0)
 
 
+## Start hidden behind a piece of cover and step out to one side. `spot`
+## comes from Cover.peek(); `side` is -1 for the player's left, +1 for right.
+## Call after setup().
+func setup_peek(cover_bearing: float, side: float, spot: Dictionary, speed: float) -> void:
+	_peek_center = cover_bearing
+	_peek_side = side
+	_peek_spot = spot
+	_peek_speed = speed
+	_stepping_out = true
+	seen = false
+	distance = spot.distance
+	bearing = cover_bearing + side * float(spot.hidden_off)
+	if stance == "prone":
+		stance = "crouch"
+		_lying = 0.0
+	update(0.0)
+
+
+func from_cover() -> bool:
+	return _peek_side != 0.0
+
+
+## True once enough of the target shows past the edge of its cover.
+func emerged() -> bool:
+	return _peek_side == 0.0 \
+		or (bearing - _peek_center) * _peek_side >= float(_peek_spot.emerge_off)
+
+
+## Take back the last movement and turn round: used when a step would have
+## carried the target out of sight behind cover.
+func undo_step() -> void:
+	bearing = _prev_bearing
+	_strafe_dir = -_strafe_dir
+	_flip_in = randf_range(0.4, 1.2)
+	update(0.0)
+
+
 ## Called when the player fires at this target.
 func shot_at() -> void:
 	if stance == "dropshot":
@@ -120,7 +167,20 @@ func update(delta: float) -> void:
 	if _flip_in <= 0.0:
 		_strafe_dir = -_strafe_dir
 		_flip_in = randf_range(0.4, 1.2)
-	bearing += rad_to_deg(speed * _strafe_dir * delta / distance)
+	_prev_bearing = bearing
+	if _stepping_out:
+		# Walk out past the edge of the cover before doing anything else.
+		bearing += _peek_side * rad_to_deg(_peek_speed * delta / distance)
+		if (bearing - _peek_center) * _peek_side >= float(_peek_spot.clear_off):
+			_stepping_out = false
+			_strafe_dir = _peek_side
+	else:
+		bearing += rad_to_deg(speed * _strafe_dir * delta / distance)
+		if _peek_side != 0.0 \
+				and (bearing - _peek_center) * _peek_side < float(_peek_spot.min_off):
+			# Never slide back behind the cover it came from.
+			bearing = _peek_center + _peek_side * float(_peek_spot.min_off)
+			_strafe_dir = _peek_side
 
 	if _dropping:
 		_lying = minf(_lying + delta / DROP_TIME, 1.0)

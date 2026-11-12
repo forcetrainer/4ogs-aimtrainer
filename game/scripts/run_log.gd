@@ -9,7 +9,7 @@ const TARGET_HEADER := "unix_time,drill,fov,sensitivity,dpi,enemy_ttk_ms,fight,f
 	"stack_index,zone,stance,offset_deg,visual_angle_deg,direction_deg,height_m," + \
 	"flick_deg,distance_m,in_view_at_spawn," + \
 	"pre_ads,react_ms,in_view_ms,ads_ms,first_shot_ms,first_hit_ms,kill_ms,shots,hits," + \
-	"headshots,first_shot_error_deg,sight"
+	"headshots,first_shot_error_deg,sight,from_cover"
 const HISTORY_HEADER := "unix_time,drill,sight,fov,sensitivity,dpi,fights,wins,enemy_ttk_start_ms," + \
 	"enemy_ttk_end_ms,median_react_ms,median_first_shot_ms,median_first_hit_ms," + \
 	"median_kill_ms,hit_rate_pct"
@@ -35,7 +35,8 @@ static func target_row(rec: Dictionary, won: bool, drill_id: String, settings: D
 		"%.1f" % rec.distance, str(int(rec.in_view_at_spawn)),
 		str(int(rec.pre_ads)), "%.1f" % rec.react, "%.1f" % rec.in_view, "%.1f" % rec.ads,
 		"%.1f" % rec.first_shot, "%.1f" % rec.first_hit, "%.1f" % rec.kill, str(rec.shots),
-		str(rec.hits), str(rec.headshots), "%.2f" % rec.first_shot_error, rec.sight])
+		str(rec.hits), str(rec.headshots), "%.2f" % rec.first_shot_error, rec.sight,
+		str(int(rec.get("from_cover", false)))])
 
 
 func write_target(rec: Dictionary, won: bool, drill_id: String, settings: Dictionary,

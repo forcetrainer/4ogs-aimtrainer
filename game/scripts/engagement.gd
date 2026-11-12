@@ -23,6 +23,7 @@ const Config = preload("res://scripts/config.gd")
 const Geo = preload("res://scripts/target_geometry.gd")
 const Target = preload("res://scripts/target.gd")
 const World = preload("res://scripts/world.gd")
+const Cover = preload("res://scripts/cover.gd")
 const Placement = preload("res://scripts/placement.gd")
 const WeaponView = preload("res://scripts/weapon_view.gd")
 const Hud = preload("res://scripts/hud.gd")
@@ -53,6 +54,8 @@ const MAX_ENEMY_TTK_MS := 5000.0
 # measured against. Nothing adapts and nothing shoots back.
 const CHECK_TIMEOUT_MS := 4000.0
 const CHECK_SEED := 20261112
+# Walking speed of an enemy stepping out from behind cover, in m/s.
+const PEEK_SPEED := 2.2
 
 ## What to run: "check" for the session check (followed by practice), or a
 ## drill id. Set by the menu before this node enters the tree.
@@ -85,6 +88,7 @@ var _next_shot_usec := 0
 var _wait_until_usec := 0
 var _paused := false
 
+var _cover: Array = Cover.layout()
 var _targets: Array = []
 var _fight_recs: Array = []
 var _first_rec := {}
@@ -121,7 +125,8 @@ func _ready() -> void:
 	hud.resume_pressed.connect(_resume)
 	hud.quit_pressed.connect(_leave)
 	_apply_settings()
-	run_log.open()
+	if dev_show == "":
+		run_log.open()
 	if mode == "check":
 		_start_check()
 	else:
@@ -129,7 +134,7 @@ func _ready() -> void:
 	match dev_show:
 		"":
 			_screenshot_if_requested()
-		"play":
+		"play", "cover":
 			_begin_run(Time.get_ticks_usec())
 			_wait_until_usec = 0
 		"results":
@@ -271,30 +276,110 @@ func _spawn_target(now: int, stack_index: int) -> Dictionary:
 		spec = {"zones": {step[0]: 1}, "stances": {step[1]: 1},
 			"vertical_chance": 1.0 if step[2] else 0.0}
 		seed(CHECK_SEED + _fights_done)
-	var place := Placement.place(spec, settings, aim, _current_hfov(), _aspect(), EYE)
+	# Some enemies are already there, behind cover, and step out. The check
+	# never uses them: its targets always appear in the open.
+	var peek := {}
+	if not _check and randf() < float(drill.get("cover_chance", 0.0)):
+		peek = _pick_peek()
 	var t: Node3D = Target.new()
 	add_child(t)
-	t.setup(place.stance, place.bearing, place.distance, profile.target_health,
-		randf_range(profile.strafe_speed_min, profile.strafe_speed_max), place.base)
+	var strafe := randf_range(profile.strafe_speed_min, profile.strafe_speed_max)
+	var place := {}
+	if peek.is_empty():
+		place = _open_place(spec)
+		t.setup(place.stance, place.bearing, place.distance, profile.target_health, strafe,
+			place.base)
+	else:
+		var piece: Dictionary = peek.piece
+		t.setup(Placement.weighted_pick(drill.stances), piece.bearing, peek.spot.distance,
+			profile.target_health, strafe)
+		t.setup_peek(piece.bearing, peek.side, peek.spot, PEEK_SPEED)
 	if _check:
 		randomize()
-	var offset := wrapf(place.bearing - aim.yaw_deg, -180.0, 180.0)
 	t.rec = {
-		"t0": now, "stack_index": stack_index, "zone": place.zone, "stance": t.stance,
-		"sight": weapon_view.sight_name(),
-		"offset": offset, "distance": t.distance, "in_view_at_spawn": place.in_view,
-		"ecc": place.ecc, "direction": place.direction, "height": place.base,
-		"flick_deg": rad_to_deg(aim.direction().angle_to((t.resting_aim_point() - EYE).normalized())),
-		"pre_ads": Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT),
-		"moved": 0.0, "react": -1.0, "in_view": 0.0 if place.in_view else -1.0, "ads": -1.0,
+		"t0": now, "stack_index": stack_index, "zone": "", "stance": t.stance,
+		"sight": weapon_view.sight_name(), "from_cover": t.from_cover(),
+		"offset": 0.0, "distance": t.distance, "in_view_at_spawn": false,
+		"ecc": -1.0, "direction": -1.0, "height": t.base_height, "flick_deg": 0.0,
+		"pre_ads": false,
+		"moved": 0.0, "react": -1.0, "in_view": -1.0, "ads": -1.0,
 		"first_shot": -1.0, "first_hit": -1.0, "kill": -1.0,
 		"shots": 0, "hits": 0, "headshots": 0, "first_shot_error": -1.0,
 	}
 	_targets.append(t)
-	if not place.in_view:
-		# Stand-in for a directional sound cue until audio is built.
-		hud.cue(offset, now)
+	if peek.is_empty():
+		_mark_seen(t, now, place)
 	return t.rec
+
+
+## The moment a target comes into sight: its clock starts and where it is
+## in the player's vision is recorded. `where` is what placement reported
+## for a target put in the open; one stepping out of cover is measured here.
+func _mark_seen(t: Node3D, now: int, where := {}) -> void:
+	if where.is_empty():
+		where = Placement.measure(t.resting_aim_point(), settings, aim, _current_hfov(),
+			_aspect(), EYE)
+	var rec: Dictionary = t.rec
+	t.seen = true
+	rec.t0 = now
+	rec.zone = where.zone
+	rec.ecc = where.ecc
+	rec.direction = where.direction
+	rec.in_view_at_spawn = where.in_view
+	rec.in_view = 0.0 if where.in_view else -1.0
+	rec.offset = wrapf(t.bearing - aim.yaw_deg, -180.0, 180.0)
+	rec.flick_deg = rad_to_deg(aim.direction().angle_to((t.resting_aim_point() - EYE).normalized()))
+	rec.pre_ads = Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
+	if not where.in_view:
+		# Stand-in for a directional sound cue until audio is built.
+		hud.cue(rec.offset, now)
+
+
+## Place a target in the open where the player can see it: not inside a
+## piece of cover and not hidden behind one.
+func _open_place(spec: Dictionary) -> Dictionary:
+	var place := {}
+	for attempt in 12:
+		place = Placement.place(spec, settings, aim, _current_hfov(), _aspect(), EYE)
+		var b := deg_to_rad(place.bearing)
+		var feet := Vector3(sin(b), 0.0, -cos(b)) * float(place.distance)
+		var chest := feet + Vector3(0.0,
+			place.base + Target.aim_height_for(place.stance), 0.0)
+		if not Cover.inside(_cover, feet, 0.7) and not Cover.blocked(_cover, EYE, chest):
+			break
+	return place
+
+
+## Choose a piece of cover and a side for an enemy to step out from, so
+## that it appears in a part of the player's vision the drill asks for.
+## Returns {} if no cover is in such a place right now.
+func _pick_peek() -> Dictionary:
+	var zone := Placement.weighted_pick(drill.zones)
+	var options := []
+	for piece: Dictionary in _cover:
+		if not piece.tall or _cover_in_use(piece):
+			continue
+		for side: float in [-1.0, 1.0]:
+			var spot := Cover.peek(piece, side)
+			var b := deg_to_rad(piece.bearing + side * float(spot.min_off))
+			var chest := Vector3(sin(b) * spot.distance, Target.aim_height_for("stand"),
+				-cos(b) * spot.distance)
+			var seen_at := Placement.measure(chest, settings, aim, _current_hfov(), _aspect(), EYE)
+			if Placement.zone_matches(zone, seen_at):
+				options.append({"piece": piece, "side": side, "spot": spot})
+	return {} if options.is_empty() else options.pick_random()
+
+
+func _cover_in_use(piece: Dictionary) -> bool:
+	for t: Node3D in _targets:
+		if t.from_cover() and absf(wrapf(t.bearing - piece.bearing, -180.0, 180.0)) < 15.0:
+			return true
+	return false
+
+
+## True once the first target of the fight is alive and in sight.
+func _first_seen() -> bool:
+	return is_instance_valid(_first_target) and _first_target.seen
 
 
 func _ms_since(rec: Dictionary, now: int) -> float:
@@ -326,6 +411,9 @@ func _finish_fight(now: int, won: bool) -> void:
 	for rec: Dictionary in _fight_recs:
 		rec["won"] = won
 		_run_recs.append(rec)
+		if dev_show == "cover":
+			print("TARGET from_cover=%s zone=%s stance=%s offset=%.0f distance=%.1f" % [
+				rec.from_cover, rec.zone, rec.stance, rec.offset, rec.distance])
 		run_log.write_target(rec, won, "check" if _check else drill_id, settings, _fight_ttk,
 			_fights_done)
 	if _fights_done >= _run_length():
@@ -405,7 +493,7 @@ func _input(event: InputEvent) -> void:
 			return
 		var c: Vector2 = event.screen_relative
 		aim.apply_counts(c.x, c.y)
-		if state == State.ACTIVE and _first_rec.react < 0.0 and is_instance_valid(_first_target):
+		if state == State.ACTIVE and _first_rec.react < 0.0 and _first_seen():
 			# Reaction = the first movement toward the target, not just any movement.
 			var since := _ms_since(_first_rec, Time.get_ticks_usec())
 			if since >= MIN_REACTION_MS:
@@ -430,7 +518,7 @@ func _input(event: InputEvent) -> void:
 		if state == State.BRIEFING and event.button_index == MOUSE_BUTTON_LEFT:
 			_begin_run(Time.get_ticks_usec())
 		elif event.button_index == MOUSE_BUTTON_RIGHT:
-			if state == State.ACTIVE and _first_rec.ads < 0.0:
+			if state == State.ACTIVE and _first_rec.ads < 0.0 and _first_seen():
 				_first_rec.ads = _ms_since(_first_rec, Time.get_ticks_usec())
 	elif event is InputEventKey and event.pressed and not event.echo:
 		match event.keycode:
@@ -476,6 +564,13 @@ func _update_fight(now: int, delta: float) -> void:
 	var half := _current_hfov() / 2.0
 	for t: Node3D in _targets:
 		t.update(delta)
+		if not t.seen:
+			# Still behind cover: nothing is timed until it shows.
+			if t.emerged():
+				_mark_seen(t, now)
+			continue
+		if not t.from_cover() and Cover.blocked(_cover, EYE, t.aim_point()):
+			t.undo_step()
 		if t.rec.in_view < 0.0 and absf(wrapf(t.bearing - aim.yaw_deg, -180.0, 180.0)) < half:
 			t.rec.in_view = _ms_since(t.rec, now)
 		if _ms_since(t.rec, now) > _fight_ttk:
@@ -532,6 +627,8 @@ func _fire(now: int) -> void:
 		var struck: Node3D = null
 		var struck_kind := Geo.MISS
 		for t: Node3D in _targets:
+			if not t.seen:
+				continue
 			var angle := view.angle_to((t.aim_point() - EYE).normalized())
 			if angle < best_angle:
 				best_angle = angle
@@ -540,6 +637,12 @@ func _fire(now: int) -> void:
 			if kind != Geo.MISS and (struck == null or t.distance < struck.distance):
 				struck = t
 				struck_kind = kind
+		if aimed_at == null:
+			aim.add_degrees(randf_range(-1.0, 1.0) * weapon.recoil_yaw_deg, weapon.recoil_pitch_deg)
+			return
+		# A bullet that meets cover before the target stops there.
+		if struck != null and Cover.ray_distance(_cover, EYE, dir) < struck.distance - 0.3:
+			struck = null
 		var rec: Dictionary = aimed_at.rec
 		rec.shots += 1
 		if rec.first_shot < 0.0:

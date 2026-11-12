@@ -92,6 +92,34 @@ static func place(drill: Dictionary, settings: Dictionary, aim: AimState, hfov: 
 	}
 
 
+## Where a point in the world sits in the player's vision right now. Returns
+## in_view, the reporting zone, and for points on screen the visual angle
+## from the crosshair (ecc) and direction around it (-1 when off screen).
+static func measure(point: Vector3, settings: Dictionary, aim: AimState, hfov: float,
+		aspect: float, eye: Vector3) -> Dictionary:
+	var tan_v := tan(deg_to_rad(Sens.horizontal_to_vertical_fov(hfov, FOV_ASPECT)) / 2.0)
+	var cam := Basis.from_euler(aim.camera_rotation()).inverse() * (point - eye)
+	if cam.z < 0.0 and absf(cam.x / -cam.z) <= tan_v * aspect and absf(cam.y / -cam.z) <= tan_v:
+		var half := screen_half_cm(settings.monitor_diagonal_in, aspect)
+		var on_screen_cm := Vector2(cam.x / -cam.z / (tan_v * aspect) * half.x,
+			cam.y / -cam.z / tan_v * half.y)
+		var ecc := rad_to_deg(atan(on_screen_cm.length() / settings.view_distance_cm))
+		return {"in_view": true, "ecc": ecc, "direction": rad_to_deg(on_screen_cm.angle()),
+			"zone": ecc_bin(ecc)}
+	var to := point - eye
+	var offset := absf(wrapf(rad_to_deg(atan2(to.x, -to.z)) - aim.yaw_deg, -180.0, 180.0))
+	return {"in_view": false, "ecc": -1.0, "direction": -1.0,
+		"zone": "behind" if offset >= maxf(hfov / 2.0 + 60.0, 120.0) else "offscreen"}
+
+
+## True if a measured position is the kind of place a drill zone asks for.
+static func zone_matches(zone: String, measured: Dictionary) -> bool:
+	if VISUAL_ZONES.has(zone):
+		var band: Array = VISUAL_ZONES[zone]
+		return measured.in_view and measured.ecc >= band[0] and measured.ecc < band[1]
+	return not measured.in_view and measured.zone == zone
+
+
 ## Choose where a target should appear on screen for a visual-field zone, then
 ## work out where in the world that is for the current view (so it holds at any
 ## game FOV and while aiming down sights). Level targets stand on the ground;

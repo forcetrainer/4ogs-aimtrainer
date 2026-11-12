@@ -56,6 +56,8 @@ func _ready() -> void:
 		_start_game(settings.get("drill", "mixed"))
 		return
 	match show:
+		"cover":
+			_start_game(settings.get("drill", "mixed"), show)
 		"briefing", "play", "pause":
 			_start_game("check", show)
 		"results":

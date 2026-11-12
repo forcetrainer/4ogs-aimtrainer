@@ -3,6 +3,7 @@
 	"goal": "Targets anywhere you can currently see, from beside the crosshair to the far edge of your vision, in every stance",
 	"zones": {"center": 1, "mid": 2, "far": 2},
 	"vertical_chance": 0.3,
+	"cover_chance": 0.4,
 	"stack_chance": 0.25,
 	"stances": {"stand": 4, "crouch": 1, "prone": 1, "jump": 1, "dropshot": 1},
 	"start_enemy_ttk_ms": 1500

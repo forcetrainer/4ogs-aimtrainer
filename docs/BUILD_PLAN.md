@@ -125,12 +125,38 @@ appears during play: numbers during training are distracting noise.
         The team has brand standards for type that have not been found;
         swap the font in `style.gd` when they are.
 
-- [ ] Scenery and cover, replacing the empty plain and the grey pillars.
-      Makes targets below the player possible.
+- [~] Scenery and cover, replacing the empty plain and the grey pillars.
+      Makes targets below the player possible. First pass 2026-11-12 in
+      `game/scripts/world.gd`: a fenced tarmac yard built from Poly Haven
+      models and textures (CC0, 49 MB, `game/assets/world/`), with
+      chain-link fence at 46 m, clusters of barriers, crates, barrels,
+      tyres and covered cars at about 40 m, and plain concrete blocks
+      beyond as buildings. Still to do:
+      - Done 2026-11-12: cover inside the yard. `game/scripts/cover.gd`
+        lists fourteen pieces (concrete walls, crate stacks, barrier rows,
+        covered cars) between 13 and 31 m and answers the geometry
+        questions; `world.gd` draws them in the same places. Targets put
+        in the open are placed where the player can see them and turn
+        back before walking behind cover. Shots that meet cover first do
+        not count as hits. Checked by tests and an unattended run; not yet
+        played by a person.
+      - Real buildings. The downloaded factory facade is a kit of wall and
+        window parts that has to be assembled; the blocks are stand-ins.
+      - Ground variety (markings, stains, patches) to break up the tarmac.
 - [ ] Enemy models in place of capsules
-- [ ] Targets that are already present or lean out, instead of popping in.
+- [~] Targets that are already present or lean out, instead of popping in.
       Only meaningful once there is cover. This is where "I didn't see him"
-      training starts.
+      training starts. First version 2026-11-12: in practice drills a
+      share of enemies (`cover_chance` in each drill file, 0.3 to 0.4)
+      wait behind a wall or crate stack and step out sideways. Their clock
+      starts when their edge first shows, and they never slide back behind
+      the cover. The log has a `from_cover` column. The session check
+      never uses them, so its results stay comparable. Still to do:
+      - Enemies rising from behind low cover (barriers, cars).
+      - Results split by "stepped out" against "appeared in the open".
+      - With the player facing one way, few tall pieces are in view, so
+        fewer enemies come from cover than the setting asks for.
+      - Raised targets still stand on a plain grey pillar.
 
 ## 4. Sound
 

@@ -14,3 +14,6 @@ mp5/
 Other assets
   Sky: see ../sky/LICENCE.txt
   Dummy-head impulse responses (SADIE II, Apache-2.0): see ../hrtf/LICENCE.txt
+
+Scenery: see assets/world/LICENCE.txt (Poly Haven, CC0).
+Brand: assets/brand/4ogs-logo.png is the 4OGS team logo, copied from the 4ogs-radios repo.

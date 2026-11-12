@@ -3,6 +3,7 @@
 	"goal": "Targets appear in the outer part of your vision, often a second one while you deal with the first",
 	"zones": {"mid": 1, "far": 4},
 	"vertical_chance": 0.3,
+	"cover_chance": 0.4,
 	"stack_chance": 0.5,
 	"stances": {"stand": 3, "crouch": 1, "prone": 2, "jump": 1, "dropshot": 1},
 	"start_enemy_ttk_ms": 1500

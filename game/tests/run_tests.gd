@@ -11,6 +11,7 @@ const Placement = preload("res://scripts/placement.gd")
 const Summary = preload("res://scripts/summary.gd")
 const RunLog = preload("res://scripts/run_log.gd")
 const SpatialSteps = preload("res://scripts/spatial_steps.gd")
+const Cover = preload("res://scripts/cover.gd")
 
 var _failures := 0
 
@@ -31,6 +32,7 @@ func _init() -> void:
 	_test_counts_toward()
 	_test_monitor_detection()
 	_test_run_history()
+	_test_cover()
 	print("FAILED: %d" % _failures if _failures else "ALL TESTS PASSED")
 	quit(1 if _failures else 0)
 
@@ -375,3 +377,80 @@ func _test_run_history() -> void:
 	_check("earlier runs keep their level, oldest first", earlier[0].level, 1320.0, 1e-9)
 	var text := Summary.run_text(s, "Mixed", 14, 20, 1200.0, 1250.0, earlier, "the red dot at FOV 110")
 	_check("run text lists earlier levels", float("1320, 1250 ms   (2 runs)" in text), 1.0, 0.0)
+
+
+func _test_cover() -> void:
+	var eye := Vector3(0, 1.7, 0)
+	# One wall 3.4 m wide and 2.4 m tall, 10 m due north.
+	var wall := {"kind": "wall", "bearing": 0.0, "distance": 10.0,
+		"half": Vector3(1.7, 1.2, 0.18), "tall": true}
+	var pieces := [wall]
+	_check("cover: straight at the wall hits it at its near face",
+		Cover.ray_distance(pieces, eye, Vector3(0, 0, -1)), 9.82, 1e-6)
+	_check("cover: a ray the other way hits nothing",
+		float(is_inf(Cover.ray_distance(pieces, eye, Vector3(0, 0, 1)))), 1.0, 0.0)
+	_check("cover: a point behind the wall is hidden",
+		float(Cover.blocked(pieces, eye, Vector3(0, 1.1, -14))), 1.0, 0.0)
+	_check("cover: a point beside the wall is visible",
+		float(Cover.blocked(pieces, eye, Vector3(4, 1.1, -14))), 0.0, 0.0)
+	_check("cover: a point in front of the wall is visible",
+		float(Cover.blocked(pieces, eye, Vector3(0, 1.1, -6))), 0.0, 0.0)
+	_check("cover: over the top of a low barrier is visible", float(Cover.blocked(
+		[{"kind": "barriers", "bearing": 0.0, "distance": 10.0, "half": Vector3(2.4, 0.42, 0.32),
+			"tall": false}], eye, Vector3(0, 1.1, -14))), 0.0, 0.0)
+	_check("cover: standing in the wall counts as inside",
+		float(Cover.inside(pieces, Vector3(1.0, 0, -10), 0.5)), 1.0, 0.0)
+	_check("cover: standing clear of it does not",
+		float(Cover.inside(pieces, Vector3(4.0, 0, -10), 0.5)), 0.0, 0.0)
+	# The same wall turned to another bearing behaves the same way.
+	var east := wall.duplicate()
+	east.bearing = 90.0
+	_check("cover: wall to the east blocks a point behind it",
+		float(Cover.blocked([east], eye, Vector3(14, 1.1, 0))), 1.0, 0.0)
+
+	# An enemy stepping out: hidden where it waits, visible once clear.
+	var spot := Cover.peek(wall, 1.0)
+	var hidden := deg_to_rad(spot.hidden_off)
+	var out := deg_to_rad(spot.min_off)
+	var d: float = spot.distance
+	_check("peek: waits out of sight", float(Cover.blocked(pieces, eye,
+		Vector3(sin(hidden) * d + 0.25, 1.1, -cos(hidden) * d))), 1.0, 0.0)
+	_check("peek: whole body shows once out", float(Cover.blocked(pieces, eye,
+		Vector3(sin(out) * d - 0.25, 1.1, -cos(out) * d))), 0.0, 0.0)
+	var t: Node3D = Target.new()
+	t.setup("stand", 0.0, d, 150.0, 2.0)
+	t.setup_peek(0.0, 1.0, spot, 2.2)
+	_check("peek: target starts unseen and not emerged", float(t.seen or t.emerged()), 0.0, 0.0)
+	var steps := 0
+	while not t.emerged() and steps < 200:
+		t.update(0.01)
+		steps += 1
+	_check("peek: emerges within a second", float(steps < 100), 1.0, 0.0)
+	for i in 600:
+		t.update(0.01)
+	_check("peek: never slides back behind the cover",
+		float(t.bearing >= spot.min_off - 1e-6), 1.0, 0.0)
+	t.free()
+
+	# Measuring where a point is in the player's vision.
+	var aim := AimState.new()
+	var s := {"monitor_diagonal_in": 34.0, "view_distance_cm": 60.0}
+	var ahead := Placement.measure(Vector3(0, 1.7, -20), s, aim, 110.0, 21.0 / 9.0, eye)
+	_check("measure: dead ahead is on the crosshair", ahead.ecc, 0.0, 1e-6)
+	var behind := Placement.measure(Vector3(0, 1.7, 20), s, aim, 110.0, 21.0 / 9.0, eye)
+	_check("measure: directly behind is behind", float(behind.zone == "behind"), 1.0, 0.0)
+	var side := Placement.measure(Vector3(20, 1.7, -2), s, aim, 110.0, 21.0 / 9.0, eye)
+	_check("measure: far to the side is off screen", float(side.zone == "offscreen"), 1.0, 0.0)
+	_check("zone match: on-screen point fits the centre zone",
+		float(Placement.zone_matches("center", {"in_view": true, "ecc": 2.0, "zone": "0-2.5"})), 1.0, 0.0)
+	_check("zone match: off-screen point does not",
+		float(Placement.zone_matches("center", behind)), 0.0, 0.0)
+	# Every piece of the real layout must leave the player a clear view of
+	# open ground somewhere, and none may sit on top of another.
+	var layout := Cover.layout()
+	var clashes := 0
+	for i in layout.size():
+		for j in range(i + 1, layout.size()):
+			var gap: float = (Cover.center(layout[i]) - Cover.center(layout[j])).length()
+			clashes += int(gap < 4.0)
+	_check("cover layout: no two pieces overlap", clashes, 0, 0)

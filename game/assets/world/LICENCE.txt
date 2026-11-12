@@ -1,0 +1,11 @@
+Scenery models and ground and wall textures in this folder are from Poly Haven
+(https://polyhaven.com), released under CC0 1.0 (public domain; no credit
+required). Downloaded 2026-11-12 at 1k texture resolution, glTF format.
+
+Models: Barrel_01, barrel_03, concrete_road_barrier, concrete_road_barrier_02,
+covered_car, modular_chainlink_fence, modular_factory_facade, old_military_crate,
+old_tyre, wooden_military_crate.
+Textures: worn_asphalt, concrete_wall_006.
+
+modular_factory_facade is not used yet: it is a kit of wall and window parts
+that still has to be assembled into buildings.
