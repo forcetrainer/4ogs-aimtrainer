@@ -31,6 +31,12 @@ const DRILLS := ["mixed", "peripheral", "offscreen"]
 const RUN_LENGTH := 20
 const EYE := Vector3(0, 1.7, 0)
 const MOVE_THRESHOLD_COUNTS := 4.0
+# Nobody reacts to something seen in under a tenth of a second; movement
+# before that was already under way when the target appeared.
+const MIN_REACTION_MS := 100.0
+# Share of the distance to the target an unbroken movement toward it must
+# cover before it counts as the reaction.
+const REACTION_RUN_SHARE := 0.1
 # One-up one-down staircase; step ratio 7:3 settles near a 70% win rate.
 const WIN_STEP := 0.97
 const LOSS_STEP := 1.07
@@ -67,6 +73,8 @@ var _wait_until_usec := 0
 var _targets: Array = []
 var _fight_recs: Array = []
 var _first_rec := {}
+var _first_target: Node3D
+var _react_run_start := 0.0
 var _stack_at_usec := 0
 var _fight_ttk := 0.0
 var _fights_done := 0
@@ -81,6 +89,7 @@ func _ready() -> void:
 	profile = Config.load_json("res://profiles/call_of_duty.json")
 	weapon = Config.load_json("res://weapons/mp5.json")
 	settings = Config.load_settings()
+	_detect_monitor(false)
 	Input.use_accumulated_input = false
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	_build_world()
@@ -245,6 +254,7 @@ func _begin_fight(now: int) -> void:
 	_fight_recs.clear()
 	_fight_ttk = CHECK_TIMEOUT_MS if _check else float(settings[_ttk_key()])
 	_first_rec = _spawn_target(now, 0)
+	_first_target = _targets.back()
 	_stack_at_usec = 0
 	if not _check and randf() < drill.stack_chance:
 		_stack_at_usec = now + int(randf_range(0.3, 0.9) * 1e6)
@@ -347,9 +357,13 @@ func _show_summary() -> void:
 		_check_cold = false
 		return
 	var stats := Summary.stats(_run_recs)
+	var run_sight := weapon_view.sight_name()
+	var earlier_runs := RunLog.earlier_runs(RunLog.read_history_file(), drill_id, run_sight,
+		settings.fov)
 	hud.show_summary(Summary.run_text(stats, drill.name, _wins, _fights_done,
-		settings[_ttk_key()], _run_start_ttk))
-	RunLog.append_history(drill_id, settings, _fights_done, _wins, _run_start_ttk,
+		settings[_ttk_key()], _run_start_ttk, earlier_runs, "%s at FOV %d" % [
+			"the red dot" if weapon_view.has_optic() else "iron sights", settings.fov]))
+	RunLog.append_history(drill_id, run_sight, settings, _fights_done, _wins, _run_start_ttk,
 		settings[_ttk_key()], stats)
 
 
@@ -361,10 +375,27 @@ func _input(event: InputEvent) -> void:
 			return
 		var c: Vector2 = event.screen_relative
 		aim.apply_counts(c.x, c.y)
-		if state == State.ACTIVE and _first_rec.react < 0.0:
-			_first_rec.moved += absf(c.x) + absf(c.y)
-			if _first_rec.moved >= MOVE_THRESHOLD_COUNTS:
-				_first_rec.react = _ms_since(_first_rec, Time.get_ticks_usec())
+		if state == State.ACTIVE and _first_rec.react < 0.0 and is_instance_valid(_first_target):
+			# Reaction = the first movement toward the target, not just any movement.
+			var since := _ms_since(_first_rec, Time.get_ticks_usec())
+			if since >= MIN_REACTION_MS:
+				var to: Vector3 = (_first_target.aim_point() - EYE).normalized()
+				var yaw_to := wrapf(rad_to_deg(atan2(to.x, -to.z)) - aim.yaw_deg, -180.0, 180.0)
+				var pitch_to := rad_to_deg(asin(clampf(to.y, -1.0, 1.0))) - aim.pitch_deg
+				var toward := AimState.counts_toward(c.x, c.y, yaw_to, pitch_to)
+				# The hand is rarely still (scanning), so one count toward the
+				# target proves nothing. Look for an unbroken run toward it that
+				# covers a real part of the distance, and time it from its start.
+				if toward <= 0.0:
+					_first_rec.moved = 0.0
+				else:
+					if _first_rec.moved == 0.0:
+						_react_run_start = since
+					_first_rec.moved += toward
+					var needed := maxf(MOVE_THRESHOLD_COUNTS,
+						REACTION_RUN_SHARE * _first_rec.flick_deg / aim.deg_per_count)
+					if _first_rec.moved >= needed:
+						_first_rec.react = _react_run_start
 	elif event is InputEventMouseButton:
 		if event.pressed and event.button_index == MOUSE_BUTTON_RIGHT:
 			if state == State.ACTIVE and _first_rec.ads < 0.0:
@@ -372,7 +403,7 @@ func _input(event: InputEvent) -> void:
 	elif event is InputEventKey and event.pressed and not event.echo:
 		var step := 0.5 if event.shift_pressed else 0.05
 		if _check_running() and event.keycode in [KEY_C, KEY_T, KEY_BRACKETLEFT,
-				KEY_BRACKETRIGHT, KEY_COMMA, KEY_PERIOD, KEY_F1, KEY_F2, KEY_F3, KEY_F4]:
+				KEY_BRACKETRIGHT, KEY_COMMA, KEY_PERIOD, KEY_F1, KEY_F2, KEY_F3, KEY_F4, KEY_F5]:
 			return
 		match event.keycode:
 			KEY_ESCAPE:
@@ -397,9 +428,13 @@ func _input(event: InputEvent) -> void:
 				settings["optic"] = weapon_view.has_optic()
 				Config.save_settings(settings)
 			KEY_F1:
-				_change("monitor_diagonal_in", clampf(settings.monitor_diagonal_in - 1.0, 13.0, 65.0))
+				settings["monitor_manual"] = true
+				_change("monitor_diagonal_in", clampf(roundf(settings.monitor_diagonal_in) - 1.0, 13.0, 65.0))
 			KEY_F2:
-				_change("monitor_diagonal_in", clampf(settings.monitor_diagonal_in + 1.0, 13.0, 65.0))
+				settings["monitor_manual"] = true
+				_change("monitor_diagonal_in", clampf(roundf(settings.monitor_diagonal_in) + 1.0, 13.0, 65.0))
+			KEY_F5:
+				_detect_monitor(true)
 			KEY_F3:
 				_change("view_distance_cm", clampf(settings.view_distance_cm - 5.0, 30.0, 150.0))
 			KEY_F4:
@@ -554,9 +589,28 @@ func _status_text() -> String:
 		"Sensitivity %.2f  [ [ / ] ]    %.1f cm/360" % [
 			settings.sensitivity,
 			Sens.cm_per_360(settings.dpi, profile.yaw_constant, settings.sensitivity)],
-		"Monitor %d in [F1 / F2] at %d cm [F3 / F4]: screen covers %d deg each side of your vision, %d up and down" % [
-			settings.monitor_diagonal_in, settings.view_distance_cm, reach.x, reach.y],
+		"Monitor %.0f in (%s) [F1 / F2, F5 = detect] at %d cm [F3 / F4]: screen covers %d deg each side of your vision, %d up and down" % [
+			settings.monitor_diagonal_in,
+			"set by hand" if settings.get("monitor_manual", false) else "detected" if settings.get("monitor_detected_for", "") != "" else "default, not detected",
+			settings.view_distance_cm, reach.x, reach.y],
 		"%s  (placeholder values)    sight: %s  [T]" % [
 			weapon.name, "red dot" if weapon_view.has_optic() else "iron sights"],
 	]
 	return "\n".join(lines)
+
+
+## Use the size the monitor reports about itself, so nobody has to type it
+## in. Asked once per screen resolution (the query takes about a second);
+## `force` asks again and drops a size set by hand.
+func _detect_monitor(force: bool) -> void:
+	var screen := str(DisplayServer.screen_get_size())
+	if not force and (settings.get("monitor_manual", false)
+			or settings.get("monitor_detected_for", "") == screen):
+		return
+	var diagonal: float = Config.detect_monitor_diagonal_in()
+	if diagonal <= 0.0:
+		return
+	settings["monitor_diagonal_in"] = diagonal
+	settings["monitor_manual"] = false
+	settings["monitor_detected_for"] = screen
+	Config.save_settings(settings)

@@ -28,6 +28,9 @@ func _init() -> void:
 	_test_summary()
 	_test_spatial_steps()
 	_test_session_check()
+	_test_counts_toward()
+	_test_monitor_detection()
+	_test_run_history()
 	print("FAILED: %d" % _failures if _failures else "ALL TESTS PASSED")
 	quit(1 if _failures else 0)
 
@@ -338,3 +341,37 @@ func _test_session_check() -> void:
 	var b := Placement.place(spec, s2, aim, 110.0, 21.0 / 9.0, Vector3(0, 1.7, 0))
 	randomize()
 	_check("seeded placement repeats", absf(a.bearing - b.bearing) + absf(a.distance - b.distance), 0.0, 1e-9)
+
+
+func _test_counts_toward() -> void:
+	# Mouse right is +x, mouse up is -y.
+	_check("toward: right at a target to the right", AimState.counts_toward(5, 0, 20, 0), 5.0, 1e-9)
+	_check("toward: left away from a target to the right", AimState.counts_toward(-5, 0, 20, 0), -5.0, 1e-9)
+	_check("toward: up at a target above", AimState.counts_toward(0, -5, 0, 10), 5.0, 1e-9)
+	_check("toward: sideways across a target above", AimState.counts_toward(5, 0, 0, 10), 0.0, 1e-9)
+	_check("toward: either way round for one behind", AimState.counts_toward(-5, 0, 170, 0), 5.0, 1e-9)
+
+
+func _test_monitor_detection() -> void:
+	_check("80 x 33 cm is a 34 inch screen", Config.diagonal_in_from_cm(80, 33), 34.07, 0.01)
+	_check("monitor query, one screen", Config.parse_monitor_query("80,33\r\n"), 34.07, 0.01)
+	_check("monitor query, two screens is ambiguous", Config.parse_monitor_query("80,33\n60,34\n"), -1.0, 0.0)
+	_check("monitor query, no size reported", Config.parse_monitor_query("0,0\n"), -1.0, 0.0)
+	_check("monitor query, nothing", Config.parse_monitor_query(""), -1.0, 0.0)
+
+
+func _test_run_history() -> void:
+	var s := Summary.stats([_rec("5-10", "stand", 8.0, 0.0, 200.0, 500.0, 900.0, 10, 6)])
+	var settings := {"fov": 110.0, "sensitivity": 6.9, "dpi": 800.0}
+	var row := RunLog.history_row("mixed", "optic", settings, 20, 14, 1500.0, 1320.0, s, 1790000000)
+	_check("history row matches its header", row.split(",").size(),
+		RunLog.HISTORY_HEADER.split(",").size(), 0)
+	var csv := "\n".join([RunLog.HISTORY_HEADER, row,
+		RunLog.history_row("mixed", "irons", settings, 20, 14, 1500.0, 1700.0, s, 1790000100),
+		RunLog.history_row("offscreen", "optic", settings, 20, 14, 1500.0, 1800.0, s, 1790000200),
+		RunLog.history_row("mixed", "optic", settings, 20, 15, 1320.0, 1250.0, s, 1790000300), ""])
+	var earlier := RunLog.earlier_runs(csv, "mixed", "optic", 110.0)
+	_check("earlier runs: same drill, sight and FOV only", earlier.size(), 2, 0)
+	_check("earlier runs keep their level, oldest first", earlier[0].level, 1320.0, 1e-9)
+	var text := Summary.run_text(s, "Mixed", 14, 20, 1200.0, 1250.0, earlier, "the red dot at FOV 110")
+	_check("run text lists earlier levels", float("1320, 1250 ms   (2 runs)" in text), 1.0, 0.0)

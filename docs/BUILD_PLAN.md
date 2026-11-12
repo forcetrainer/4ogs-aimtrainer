@@ -42,9 +42,14 @@ Anything shaky here undermines everything timed or built on top of it.
       screen), `hud.gd` (text and markers), `summary.gd` (results) and
       `run_log.gd` (files). Placement, summary and the log row format are
       covered by `game/tests/run_tests.gd`.
-- [ ] `[you]` **Monitor size.** Set it in the drill with `F1` / `F2` (and
-      viewing distance with `F3` / `F4`). The zones are wrong until this
-      matches the real screen.
+- [x] **Monitor size.** Detected 2026-11-12 from the size the monitor
+      reports to Windows (34 in, 3440x1440, 21:9), once per screen
+      resolution. `F1` / `F2` override it by hand and `F5` detects again.
+      With more than one screen connected it cannot tell which is in use
+      and keeps the current value. `[you]` Viewing distance cannot be
+      detected: set it with `F3` / `F4` (currently 60 cm). A wrong size or
+      distance shifts every target's real angle from the crosshair by
+      about the same proportion.
 - [ ] `[you]` **In-game baseline.** On hold (2026-11-12). Skill-based
       matchmaking confounds it: lobbies get harder as the player improves,
       so kill/death ratio and win rate tend to stay flat and cannot show
@@ -77,9 +82,19 @@ from its first day.
         and FOV only, since other settings are not comparable.
       - Changing `check.json` means raising its `version`, which starts a
         fresh comparison.
-- [~] Run history, with results shown by sight and by FOV. Done for the
-      session check; practice runs are not yet split by sight.
-- [ ] Improving / holding / stuck status from the session checks
+- [x] Run history, with results shown by sight and by FOV. Done
+      2026-11-12 for the session check and for practice runs
+      (`history_v3.csv`, which adds the sight; the results screen lists the
+      level earlier runs of the same drill ended on, same sight and FOV
+      only). Older `history_v2.csv` rows have no sight and are not shown.
+- [x] Reaction time means the start of an unbroken mouse movement toward
+      the target covering at least a tenth of the distance to it, ignoring
+      the first 100 ms. The player scans constantly, so "any movement" read
+      as an instant reaction. Still approximate: scanning that happens to
+      head toward the target looks like a reaction.
+- [ ] Improving / holding / stuck status from the session checks. Waiting
+      on a week or so of real checks, to see how much the score varies
+      from day to day before choosing a threshold.
 - [ ] Python for analysis outside the game
 
 ## 3. The world

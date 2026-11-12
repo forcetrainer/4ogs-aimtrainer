@@ -4,13 +4,13 @@ extends RefCounted
 
 const Config = preload("res://scripts/config.gd")
 
-const HISTORY_PATH := "user://history_v2.csv"
+const HISTORY_PATH := "user://history_v3.csv"
 const TARGET_HEADER := "unix_time,drill,fov,sensitivity,dpi,enemy_ttk_ms,fight,fight_won," + \
 	"stack_index,zone,stance,offset_deg,visual_angle_deg,direction_deg,height_m," + \
 	"flick_deg,distance_m,in_view_at_spawn," + \
 	"pre_ads,react_ms,in_view_ms,ads_ms,first_shot_ms,first_hit_ms,kill_ms,shots,hits," + \
 	"headshots,first_shot_error_deg,sight"
-const HISTORY_HEADER := "unix_time,drill,fov,sensitivity,dpi,fights,wins,enemy_ttk_start_ms," + \
+const HISTORY_HEADER := "unix_time,drill,sight,fov,sensitivity,dpi,fights,wins,enemy_ttk_start_ms," + \
 	"enemy_ttk_end_ms,median_react_ms,median_first_shot_ms,median_first_hit_ms," + \
 	"median_kill_ms,hit_rate_pct"
 
@@ -47,8 +47,37 @@ func write_target(rec: Dictionary, won: bool, drill_id: String, settings: Dictio
 
 
 ## Add one finished run to the history. `stats` comes from Summary.stats().
-static func append_history(drill_id: String, settings: Dictionary, fights: int, wins: int,
-		ttk_start: float, ttk_end: float, stats: Dictionary) -> void:
+static func history_row(drill_id: String, sight: String, settings: Dictionary, fights: int,
+		wins: int, ttk_start: float, ttk_end: float, stats: Dictionary, unix_time: int) -> String:
+	var stage: Dictionary = stats.stage
+	return "%d,%s,%s,%s,%s,%s,%d,%d,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.1f" % [
+		unix_time, drill_id, sight, str(settings.fov),
+		str(settings.sensitivity), str(settings.dpi), fights, wins, ttk_start, ttk_end,
+		Config.median(stage.react), Config.median(stage.first_shot),
+		Config.median(stage.first_hit), Config.median(stage.kill), stats.hit_rate]
+
+
+## Past runs of one drill with the same sight and FOV, oldest first, as
+## {"date", "level"} where level is the enemy time-to-kill the run ended on.
+static func earlier_runs(csv_text: String, drill_id: String, sight: String, fov: float) -> Array:
+	var out := []
+	var bias: int = int(Time.get_time_zone_from_system().bias) * 60
+	for line: String in csv_text.split("\n", false).slice(1):
+		var c := line.strip_edges().split(",")
+		if c.size() < 10 or c[1] != drill_id or c[2] != sight \
+				or not is_equal_approx(float(c[3]), fov):
+			continue
+		out.append({"date": Time.get_date_string_from_unix_time(int(c[0]) + bias),
+			"level": float(c[9])})
+	return out
+
+
+static func read_history_file() -> String:
+	return FileAccess.get_file_as_string(HISTORY_PATH) if FileAccess.file_exists(HISTORY_PATH) else ""
+
+
+static func append_history(drill_id: String, sight: String, settings: Dictionary, fights: int,
+		wins: int, ttk_start: float, ttk_end: float, stats: Dictionary) -> void:
 	var is_new := not FileAccess.file_exists(HISTORY_PATH)
 	var f := FileAccess.open(HISTORY_PATH, FileAccess.WRITE if is_new else FileAccess.READ_WRITE)
 	if not f:
@@ -56,12 +85,8 @@ static func append_history(drill_id: String, settings: Dictionary, fights: int, 
 	if is_new:
 		f.store_line(HISTORY_HEADER)
 	f.seek_end()
-	var stage: Dictionary = stats.stage
-	f.store_line("%d,%s,%s,%s,%s,%d,%d,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.1f" % [
-		_now(), drill_id, str(settings.fov),
-		str(settings.sensitivity), str(settings.dpi), fights, wins, ttk_start, ttk_end,
-		Config.median(stage.react), Config.median(stage.first_shot),
-		Config.median(stage.first_hit), Config.median(stage.kill), stats.hit_rate])
+	f.store_line(history_row(drill_id, sight, settings, fights, wins, ttk_start, ttk_end,
+		stats, _now()))
 
 
 static func _now() -> int:

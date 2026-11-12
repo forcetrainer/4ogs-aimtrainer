@@ -62,7 +62,7 @@ static func stats(recs: Array) -> Dictionary:
 
 ## The end-of-run screen.
 static func run_text(s: Dictionary, drill_name: String, wins: int, fights: int,
-		ttk_now: float, ttk_start: float) -> String:
+		ttk_now: float, ttk_start: float, earlier: Array = [], setup := "") -> String:
 	var lines := [
 		"%s: won %d of %d fights" % [drill_name, wins, fights],
 		"",
@@ -95,8 +95,17 @@ static func run_text(s: Dictionary, drill_name: String, wins: int, fights: int,
 		if s.stance_kill.has(stance):
 			lines.append("   %-18s %s  (%d targets)" % [
 				stance, fmt_ms(Config.median(s.stance_kill[stance])), s.stance_kill[stance].size()])
+	if not earlier.is_empty():
+		# `earlier` is {"date", "level"} for past runs of this drill at the
+		# same sight and FOV, oldest first.
+		lines.append("")
+		lines.append("Level at the end of earlier runs with %s (most recent last):" % setup)
+		var shown := []
+		for e: Dictionary in earlier.slice(-6):
+			shown.append("%d" % e.level)
+		lines.append("   %s ms   (%d runs)" % [", ".join(shown), earlier.size()])
 	lines.append("")
-	lines.append("Space = another run     1 / 2 / 3 = change drill     C = session check     Esc = quit")
+	lines.append("Space = another run    1 / 2 / 3 = change drill     C = session check     Esc = quit")
 	return "\n".join(lines)
 
 

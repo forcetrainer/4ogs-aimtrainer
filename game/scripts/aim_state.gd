@@ -46,3 +46,16 @@ func reset() -> void:
 ## Euler rotation for a Godot camera (positive Y rotation turns left).
 func camera_rotation() -> Vector3:
 	return Vector3(deg_to_rad(pitch_deg), -deg_to_rad(fposmod(yaw_deg, 360.0)), 0.0)
+
+
+## How many of a mouse movement's counts go toward a target that is
+## `yaw_to` degrees to the right and `pitch_to` degrees above the crosshair
+## (negative when the movement heads away). For a target roughly behind,
+## turning either way is toward it.
+static func counts_toward(dx: float, dy: float, yaw_to: float, pitch_to: float) -> float:
+	if absf(yaw_to) > 120.0:
+		return absf(dx)
+	var to := Vector2(yaw_to, pitch_to)
+	if to.length() < 1e-6:
+		return 0.0
+	return Vector2(dx, -dy).dot(to.normalized())
