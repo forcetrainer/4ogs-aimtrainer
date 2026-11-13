@@ -540,3 +540,20 @@ on the menus.
   quarter second, and across the repeat the quietest tenth of a second is
   58% of the average, so there is no gap. Not yet heard by a person, so
   whether it is the right music is unknown.
+
+### Published (2026-11-12)
+
+- Public repository: https://github.com/forcetrainer/4ogs-aimtrainer (MIT).
+- v0.1.0, marked as a pre-release, with a Windows zip (302 MB): unzip and
+  run, no installer and no Godot needed. Built with
+  `godot --headless --path game --export-release "Windows Desktop" ...`
+  using `game/export_presets.cfg`; the export templates are installed in
+  Godot's own data folder.
+- Commit authors were rewritten to GitHub's no-reply address before the
+  first push, so no personal email is in the public history.
+- The Fab kit and Mixamo files are not in the repository (their licences
+  do not allow it) but are inside the build (which they do allow). From
+  source the game uses concrete blocks and capsules instead.
+- Not done: the build is unsigned, so Windows warns on first run; it has
+  only been run on the machine that built it; nobody has installed it from
+  the zip on another PC.
