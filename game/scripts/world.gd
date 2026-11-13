@@ -10,6 +10,7 @@ extends RefCounted
 
 const Lighting = preload("res://scripts/lighting.gd")
 const Cover = preload("res://scripts/cover.gd")
+const Kit = preload("res://scripts/kit.gd")
 
 const MODELS := "res://assets/world/models"
 const TEXTURES := "res://assets/world/textures"
@@ -36,6 +37,15 @@ static func build(parent: Node) -> Vector3:
 	_buildings(parent, rng)
 	_perimeter(parent)
 	_props(parent, rng)
+	# The scrap-built structure from the kit, one in each corner of the
+	# yard, each turned a different way so they do not read as copies.
+	var corner := WALL_HALF - 9.0
+	var turns := [0.6, 2.4, 3.9, 5.3]
+	for i in 4:
+		var structure := Kit.building()
+		structure.position = Basis(Vector3.UP, i * PI / 2.0) * Vector3(corner, 0.0, -corner)
+		structure.rotation.y = turns[i]
+		parent.add_child(structure)
 	return sun_dir
 
 
@@ -45,35 +55,75 @@ static func build(parent: Node) -> Vector3:
 static func build_cover(parent: Node, pieces: Array) -> Node3D:
 	var holder := Node3D.new()
 	parent.add_child(holder)
-	var wall := _surface("concrete_wall_006", Vector3(0.4, 0.4, 0.4), true)
 	for piece: Dictionary in pieces:
 		var ground := Cover.away(piece) * float(piece.distance)
 		var across := Cover.across(piece)
-		var away := Cover.away(piece)
 		var yaw := -deg_to_rad(piece.bearing)
+		if not Kit.available():
+			# The kit's files are not shared with the project (its licence does
+			# not allow it), so without them each piece is a plain concrete
+			# block the size and place of the real thing.
+			var block := MeshInstance3D.new()
+			var shape := BoxMesh.new()
+			shape.size = piece.half * 2.0
+			block.mesh = shape
+			block.material_override = _surface("concrete_wall_006", Vector3(0.4, 0.4, 0.4), true)
+			block.position = Cover.center(piece)
+			block.rotation.y = yaw
+			holder.add_child(block)
+			if piece.kind == "tower":
+				var deck := MeshInstance3D.new()
+				var slab := BoxMesh.new()
+				slab.size = Vector3(4.1, 0.12, 1.4)
+				deck.mesh = slab
+				deck.material_override = block.material_override
+				deck.position = ground + Cover.away(piece) * 0.45 + Vector3(0.0, Cover.TOWER_DECK - 0.06, 0.0)
+				deck.rotation.y = yaw
+				holder.add_child(deck)
+			continue
 		match piece.kind:
-			"wall":
-				var slab := MeshInstance3D.new()
-				var box := BoxMesh.new()
-				box.size = piece.half * 2.0
-				slab.mesh = box
-				slab.material_override = wall
-				slab.position = Cover.center(piece)
-				slab.rotation.y = yaw
-				holder.add_child(slab)
-			"crates":
-				for level in 5:
+			"plates":
+				# Riveted steel plates, two wide and two high, with a post at
+				# each end.
+				for level in 2:
 					for i in 2:
-						for k in 2:
-							_place(holder, "wooden_military_crate",
-								ground + across * (i - 0.5) * 1.26 + away * (k - 0.5) * 0.54
-									+ Vector3(0.0, level * 0.47, 0.0), yaw)
+						_kit(holder, Kit.PLATE, ground + across * (i - 0.5) * Kit.PLATE_WIDTH
+							+ Vector3(0.0, level * Kit.PLATE_HEIGHT, 0.0), yaw)
+				for end: float in [-1.0, 1.0]:
+					_kit(holder, Kit.POST, ground + across * end * Kit.PLATE_WIDTH, yaw)
+			"tower":
+				# A platform on four legs with a ladder, and on it the steel
+				# screen an enemy steps out from. The deck sits a little
+				# behind the screen so there is room to stand.
+				var back := Cover.away(piece) * 0.45
+				var up := Vector3(0.0, Cover.TOWER_DECK, 0.0)
+				for leg_across: float in [-1.85, 1.85]:
+					for leg_back: float in [-0.5, 0.5]:
+						_kit(holder, Kit.BEAM, ground + back + across * leg_across
+							+ Cover.away(piece) * leg_back, yaw)
+				_kit(holder, Kit.WALKWAY, ground + back + up - Vector3(0.0, 0.08, 0.0), yaw + PI / 2.0)
+				_kit(holder, Kit.LADDER, ground + back + across * 2.25, yaw + PI / 2.0)
+				for level in 2:
+					_kit(holder, Kit.PLATE, ground + up + Vector3(0.0, level * Kit.PLATE_HEIGHT, 0.0), yaw)
+			"tank":
+				_kit(holder, Kit.TANK, ground, yaw)
+			"rack":
+				_kit(holder, Kit.RACK, ground, yaw)
 			"barriers":
-				for i in 3:
-					_place(holder, "concrete_road_barrier", ground + across * (i - 1.0) * 1.6, yaw)
-			"car":
-				_place(holder, "covered_car", ground, yaw + PI / 2.0)
+				for i in 2:
+					_kit(holder, Kit.BARRIER, ground + across * (i - 0.5) * Kit.BARRIER_LENGTH, yaw)
+			"dumpster":
+				_kit(holder, Kit.DUMPSTER, ground, yaw)
+			"barrels":
+				_kit(holder, Kit.BARRELS, ground, yaw)
 	return holder
+
+
+static func _kit(parent: Node, index: int, at: Vector3, yaw: float) -> void:
+	var node := Kit.part(index)
+	node.position = at
+	node.rotation.y = yaw
+	parent.add_child(node)
 
 
 ## A material from a Poly Haven texture set. Triplanar mapping lets one

@@ -31,8 +31,31 @@ static func build(parent: Node) -> Vector3:
 		env.background_color = Color(0.36, 0.42, 0.48)
 		env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 		env.ambient_light_color = Color(0.62, 0.62, 0.66)
-	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	# The grade: a film-like response, slightly more contrast and slightly
+	# less colour, which is most of what makes a scene read as "a game"
+	# rather than a model viewer.
+	env.tonemap_mode = Environment.TONE_MAPPER_ACES
+	env.tonemap_white = 6.0
+	env.adjustment_enabled = true
+	env.adjustment_contrast = 1.08
+	env.adjustment_saturation = 0.9
 	env.ssao_enabled = true
+	env.ssao_radius = 1.4
+	env.ssao_intensity = 2.2
+	# Haze. It separates near from far and softens the horizon. Kept thin:
+	# at the furthest a target stands (35 m) it removes about a tenth of its
+	# contrast, so it does not make targets harder to see.
+	env.fog_enabled = true
+	env.fog_light_color = Color(0.62, 0.68, 0.76)
+	env.fog_density = 0.002
+	env.fog_aerial_perspective = 0.5
+	env.fog_sky_affect = 0.0
+	env.fog_sun_scatter = 0.04
+	# A little bloom on the brightest things only (sky, sunlit concrete).
+	env.glow_enabled = true
+	env.glow_intensity = 0.35
+	env.glow_bloom = 0.04
+	env.glow_hdr_threshold = 1.1
 	var world_env := WorldEnvironment.new()
 	world_env.environment = env
 	parent.add_child(world_env)
@@ -42,6 +65,9 @@ static func build(parent: Node) -> Vector3:
 	sun.light_color = Color(1.0, 0.96, 0.9)
 	sun.light_energy = 1.3
 	sun.directional_shadow_max_distance = 120.0
+	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
+	sun.directional_shadow_blend_splits = true
+	sun.light_angular_distance = 0.6
 	parent.add_child(sun)
 	# A directional light shines along its -Z axis, away from the sun.
 	var up := Vector3.FORWARD if absf(sun_dir.y) > 0.99 else Vector3.UP

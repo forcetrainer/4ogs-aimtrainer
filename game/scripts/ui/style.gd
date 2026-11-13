@@ -11,6 +11,9 @@ const TEXT := Color(0.93, 0.94, 0.96)
 const DIM := Color(0.6, 0.63, 0.7)
 const LINE := Color(1, 1, 1, 0.12)
 const LOGO_PATH := "res://assets/brand/4ogs-logo.png"
+## How far the lettering sits left of the middle of the logo image, as a
+## share of its width. Shift the image right by this to centre the lettering.
+const LOGO_OPTICAL_SHIFT := 0.055
 
 
 static func font(weight := 500) -> SystemFont:

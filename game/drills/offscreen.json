@@ -1,6 +1,6 @@
 {
 	"name": "Off screen",
-	"goal": "Targets appear outside the screen or behind you. An edge bar shows the side until sound cues are built",
+	"goal": "Targets appear outside the screen or behind you, with nothing on screen to point at them. Listen for footsteps and gunfire. Wear headphones",
 	"zones": {"offscreen": 3, "behind": 1},
 	"vertical_chance": 0.0,
 	"cover_chance": 0.3,

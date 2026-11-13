@@ -6,38 +6,51 @@ extends RefCounted
 ## Every piece is a box that faces the player's position at the middle of
 ## the yard, so its width runs across the player's view and its depth runs
 ## away from them. A piece is a Dictionary:
-##   kind      "wall", "crates", "barriers" or "car"
+##   kind      "plates", "tank", "rack", "tower" (tall), "barriers", "dumpster", "barrels" (low)
 ##   bearing   degrees clockwise from north (-Z), as seen from the middle
 ##   distance  metres from the middle to the centre of the box
 ##   half      half its width (across), height and depth
 ##   tall      true if a standing enemy is fully hidden behind it
+##   lift      height of the bottom of the box above the ground (0 for most)
+##   foot      half the width and depth of ground the piece takes up
+##
+## A "tower" is a raised platform with a steel screen on it. Its box is the
+## screen, up in the air; an enemy stands on the platform behind the screen
+## and steps out along it. That is how enemies above the player appear.
 
 ## Half sizes for each kind: across, up, deep.
 const KINDS := {
-	"wall": {"half": Vector3(1.7, 1.2, 0.18), "tall": true},
-	"crates": {"half": Vector3(1.26, 1.18, 0.54), "tall": true},
-	"barriers": {"half": Vector3(2.4, 0.42, 0.32), "tall": false},
-	"car": {"half": Vector3(2.2, 0.65, 0.9), "tall": false},
+	"plates": {"half": Vector3(1.6, 1.29, 0.12), "tall": true},
+	"tank": {"half": Vector3(1.27, 1.75, 1.27), "tall": true},
+	"rack": {"half": Vector3(1.27, 1.31, 0.4), "tall": true},
+	"barriers": {"half": Vector3(2.64, 0.44, 0.35), "tall": false},
+	"dumpster": {"half": Vector3(0.98, 0.72, 0.6), "tall": false},
+	"barrels": {"half": Vector3(0.93, 0.55, 0.8), "tall": false},
+	"tower": {"half": Vector3(0.78, 1.29, 0.12), "tall": true, "lift": TOWER_DECK,
+		"foot": Vector3(2.3, 0.0, 1.3)},
 }
 ## Where the pieces stand: bearing, distance, kind.
 const LAYOUT := [
-	[25.0, 17.0, "wall"], [150.0, 21.0, "wall"], [245.0, 15.0, "wall"], [318.0, 26.0, "wall"],
-	[338.0, 18.0, "wall"], [100.0, 27.0, "wall"], [218.0, 28.0, "wall"],
-	[80.0, 24.0, "crates"], [200.0, 19.0, "crates"],
-	[110.0, 13.0, "barriers"], [285.0, 22.0, "barriers"], [352.0, 30.0, "barriers"],
-	[170.0, 29.0, "car"], [52.0, 31.0, "car"],
+	[25.0, 17.0, "plates"], [150.0, 21.0, "tank"], [245.0, 15.0, "tower"], [318.0, 26.0, "rack"],
+	[338.0, 18.0, "tank"], [100.0, 27.0, "tower"], [218.0, 28.0, "rack"],
+	[80.0, 24.0, "tank"], [200.0, 19.0, "plates"],
+	[110.0, 13.0, "barriers"], [285.0, 22.0, "barriers"], [352.0, 30.0, "barrels"],
+	[170.0, 29.0, "dumpster"], [52.0, 31.0, "dumpster"],
 ]
 ## How far behind a piece an enemy stands, measured from its back face.
 const STAND_BEHIND := 0.7
+## Height of a tower platform above the ground, in metres.
+const TOWER_DECK := 2.68
 const BODY_RADIUS := 0.25
+## How far an enemy walks behind cover before reaching its edge, in metres
+## (less if the piece is too narrow).
+const WALK_IN := 1.4
 
 
 static func layout() -> Array:
 	var pieces := []
 	for row: Array in LAYOUT:
-		var kind: Dictionary = KINDS[row[2]]
-		pieces.append({"kind": row[2], "bearing": row[0], "distance": row[1],
-			"half": kind.half, "tall": kind.tall})
+		_add(pieces, row[2], row[0], row[1])
 	return pieces
 
 
@@ -63,7 +76,8 @@ static func generate(arena_seed: int) -> Array:
 	for i in tall_count:
 		# Keep clear of the sector's edges so neighbours cannot crowd.
 		var bearing := turn + (i + rng.randf_range(0.3, 0.7)) * sector
-		_add(pieces, "wall" if rng.randf() < 0.65 else "crates", bearing,
+		_add(pieces, ["plates", "plates", "tank", "rack", "tower", "tower"][rng.randi_range(0, 5)],
+			bearing,
 			rng.randf_range(NEAR + 1.0, FAR - 2.0))
 	var low_count := rng.randi_range(3, 5)
 	var tries := 0
@@ -71,7 +85,7 @@ static func generate(arena_seed: int) -> Array:
 		tries += 1
 		var bearing := rng.randf_range(0.0, 360.0)
 		if _clear_of(pieces, bearing):
-			_add(pieces, "barriers" if rng.randf() < 0.6 else "car", bearing,
+			_add(pieces, ["barriers", "barriers", "dumpster", "barrels"][rng.randi_range(0, 3)], bearing,
 				rng.randf_range(NEAR, FAR))
 			low_count -= 1
 	return pieces
@@ -80,7 +94,8 @@ static func generate(arena_seed: int) -> Array:
 static func _add(pieces: Array, kind_name: String, bearing: float, distance: float) -> void:
 	var kind: Dictionary = KINDS[kind_name]
 	pieces.append({"kind": kind_name, "bearing": fposmod(bearing, 360.0), "distance": distance,
-		"half": kind.half, "tall": kind.tall})
+		"half": kind.half, "tall": kind.tall, "lift": float(kind.get("lift", 0.0)),
+		"foot": kind.get("foot", kind.half)})
 
 
 static func _clear_of(pieces: Array, bearing: float) -> bool:
@@ -104,7 +119,8 @@ static func across(piece: Dictionary) -> Vector3:
 
 ## Middle of the box.
 static func center(piece: Dictionary) -> Vector3:
-	return away(piece) * piece.distance + Vector3(0.0, piece.half.y, 0.0)
+	return away(piece) * piece.distance \
+		+ Vector3(0.0, float(piece.get("lift", 0.0)) + piece.half.y, 0.0)
 
 
 ## How far along a ray the nearest piece is hit, or INF if it hits none.
@@ -153,8 +169,9 @@ static func blocked(pieces: Array, from: Vector3, to: Vector3) -> bool:
 static func inside(pieces: Array, point: Vector3, margin: float) -> bool:
 	for piece: Dictionary in pieces:
 		var rel := point - center(piece)
-		if absf(rel.dot(across(piece))) <= piece.half.x + margin \
-				and absf(rel.dot(away(piece))) <= piece.half.z + margin:
+		var foot: Vector3 = piece.get("foot", piece.half)
+		if absf(rel.dot(across(piece))) <= foot.x + margin \
+				and absf(rel.dot(away(piece))) <= foot.z + margin:
 			return true
 	return false
 
@@ -174,7 +191,10 @@ static func peek(piece: Dictionary, _side: float) -> Dictionary:
 	var body := rad_to_deg(atan(BODY_RADIUS / stand))
 	return {
 		"distance": stand,
-		"hidden_off": edge - body * 2.4,
+		"stand_height": float(piece.get("lift", 0.0)),
+		# It starts well back from the edge and walks out, so its footsteps
+		# are heard for most of a second before it shows.
+		"hidden_off": maxf(edge - body * 2.4 - rad_to_deg(atan(WALK_IN / stand)), 0.0),
 		"emerge_off": edge - body,
 		"min_off": edge + body * 1.2,
 		"clear_off": edge + body * 2.4,

@@ -14,10 +14,11 @@ const World = preload("res://scripts/world.gd")
 const Cover = preload("res://scripts/cover.gd")
 const Engagement = preload("res://scripts/engagement.gd")
 const SettingsMenu = preload("res://scripts/ui/settings_menu.gd")
+const LogoWall = preload("res://scripts/ui/logo_wall.gd")
+const Music = preload("res://scripts/music.gd")
 
 const AUDIO_TEST := "res://tests/audio_test.tscn"
 const DRILLS := ["mixed", "peripheral", "offscreen"]
-const SPLASH_SECONDS := 4.0
 
 var settings := {}
 
@@ -26,7 +27,9 @@ var _screen: Control
 var _backdrop: Node3D
 var _backdrop_camera: Camera3D
 var _game: Node
-var _splash_left := 0.0
+## True while the title screen is up, waiting for a key or a click.
+var _on_title := false
+var _music: Music
 var _describe: Label
 
 
@@ -36,6 +39,8 @@ func _ready() -> void:
 	_fit_scale()
 	get_window().size_changed.connect(_fit_scale)
 
+	_music = Music.new()
+	add_child(_music)
 	var layer := CanvasLayer.new()
 	layer.layer = 5
 	add_child(layer)
@@ -63,6 +68,12 @@ func _ready() -> void:
 			_start_game("check", show)
 		"results":
 			_start_game(settings.get("drill", "mixed"), show)
+		"logos2":
+			_build_backdrop()
+			_show_logos(1)
+		"logos":
+			_build_backdrop()
+			_show_logos()
 		"menu":
 			_build_backdrop()
 			_show_menu()
@@ -89,10 +100,6 @@ func _fit_scale() -> void:
 func _process(delta: float) -> void:
 	if _backdrop_camera:
 		_backdrop_camera.rotate_y(-delta * 0.035)
-	if _splash_left > 0.0:
-		_splash_left -= delta
-		if _splash_left <= 0.0:
-			_show_menu()
 
 
 func _input(event: InputEvent) -> void:
@@ -100,10 +107,11 @@ func _input(event: InputEvent) -> void:
 		return
 	var pressed: bool = (event is InputEventKey or event is InputEventMouseButton) \
 		and event.pressed
-	if _splash_left > 0.0:
+	if _on_title:
+		# The title screen waits as long as it takes for a key or a click.
 		if pressed:
 			get_viewport().set_input_as_handled()
-			_show_menu()
+			_show_logos()
 	elif event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE \
 			and _screen and _screen.has_meta("sub"):
 		_show_menu()
@@ -137,7 +145,7 @@ func _drop_backdrop() -> void:
 func _set_screen(screen: Control, sub: bool) -> void:
 	if _screen:
 		_screen.queue_free()
-	_splash_left = 0.0
+	_on_title = false
 	_screen = screen
 	if sub:
 		screen.set_meta("sub", true)
@@ -233,7 +241,16 @@ func _show_splash() -> void:
 	var stack := VBoxContainer.new()
 	stack.add_theme_constant_override("separation", 26)
 	center.add_child(stack)
-	stack.add_child(Style.logo(620))
+	# The logo image is centred, but the mark inside it is not: the flag on
+	# the top stroke runs out to the right, so the lettering sits left of
+	# the image's middle. Nudge the image right so the lettering is centred.
+	var logo := Style.logo(620)
+	var logo_box := Control.new()
+	logo_box.custom_minimum_size = logo.custom_minimum_size
+	logo.position.x = 620 * Style.LOGO_OPTICAL_SHIFT
+	logo.size = logo.custom_minimum_size
+	logo_box.add_child(logo)
+	stack.add_child(logo_box)
 	var tag := Style.side_quest_tag()
 	tag.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	stack.add_child(tag)
@@ -247,7 +264,10 @@ func _show_splash() -> void:
 	prompt.offset_bottom = -80
 	screen.add_child(prompt)
 	_set_screen(screen, false)
-	_splash_left = SPLASH_SECONDS
+	_on_title = true
+	# The music lands its opening hit as the title appears, and carries on
+	# through the logos and into the menu.
+	_music.start()
 	screen.modulate.a = 0.0
 	create_tween().tween_property(screen, "modulate:a", 1.0, 0.7)
 	var pulse := create_tween().bind_node(prompt).set_loops()
@@ -278,6 +298,8 @@ func _footer(screen: Control, pairs: Array) -> void:
 
 
 func _show_menu() -> void:
+	if not _music.is_playing():
+		_music.resume()
 	var screen := _full()
 	screen.add_child(_shade())
 	var col := _column(screen)
@@ -344,10 +366,11 @@ func _show_settings() -> void:
 # ---------- starting and leaving the drill ----------
 
 func _clear_for_game() -> void:
+	_music.fade_out(1.0)
 	if _screen:
 		_screen.queue_free()
 		_screen = null
-	_splash_left = 0.0
+	_on_title = false
 	_drop_backdrop()
 
 
@@ -377,3 +400,16 @@ func _back_from_game() -> void:
 	settings = Config.load_settings()
 	_build_backdrop()
 	_show_menu()
+
+
+## The wall of made-up engine and studio logos, shown after the splash.
+func _show_logos(start_page := 0) -> void:
+	var screen := _full()
+	var wall := LogoWall.new()
+	wall.start_page = start_page
+	# It decides for itself when it is over (it is in no hurry).
+	wall.finished.connect(_show_menu)
+	screen.add_child(wall)
+	_set_screen(screen, false)
+	screen.modulate.a = 0.0
+	create_tween().tween_property(screen, "modulate:a", 1.0, 0.5)

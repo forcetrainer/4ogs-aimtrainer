@@ -1,0 +1,9 @@
+Footstep recordings: "Fantozzi's Footsteps (Grass/Sand & Stone)" by Fantozzi,
+submitted to OpenGameArt by qubodup, released under CC0.
+https://opengameart.org/content/fantozzis-footsteps-grasssand-stone
+Downloaded 2026-11-12 as Fantozzi-footsteps.7z (476 KB). Only the six "stone"
+steps are kept here; four are used.
+
+assets/audio/footsteps_hrtf/ is rendered from them by
+tests/tools_render_footsteps.gd through the SADIE II dummy-head impulse
+responses in assets/hrtf (Apache-2.0).

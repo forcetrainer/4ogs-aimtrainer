@@ -6,19 +6,22 @@ extends Node
 ## front/back and some up/down. Because the sounds are ordinary stereo files
 ## this works at any output rate and needs no audio add-on.
 ##
-## The direction is fixed for the length of one step (0.14 s); turning
+## The direction is fixed for the length of one step (0.28 s); turning
 ## changes what the next step sounds like.
 
-const Synth = preload("res://scripts/footstep_synth.gd")
+## How many different recorded steps there are for each direction.
+const VARIANTS := 4
 
 const DIR := "res://assets/audio/footsteps_hrtf"
 ## Stored directions: elevation in degrees -> spacing around, in degrees.
 const GRID := {-30: 15, 0: 5, 30: 15}
 const VOICES := 6
-## Distance at which a step plays at full level; it falls 6 dB per doubling
-## beyond that.
-const FULL_LEVEL_M := 5.0
-const MIN_DB := -30.0
+## Footsteps are a close sound. A step plays at full level within
+## FULL_LEVEL_M, falls 6 dB per doubling beyond that and a further 1.5 dB
+## per metre past FADE_FROM_M, and cannot be heard at all past RANGE_M.
+const FULL_LEVEL_M := 4.0
+const FADE_FROM_M := 9.0
+const RANGE_M := 16.0
 
 var _bank := {}
 var _voices: Array[AudioStreamPlayer] = []
@@ -29,7 +32,7 @@ func _ready() -> void:
 	for ele: int in GRID:
 		for azi in range(0, 360, GRID[ele]):
 			var streams := []
-			for v in Synth.VARIANTS:
+			for v in VARIANTS:
 				streams.append(load("%s/step%d_azi_%d_ele_%d.wav" % [DIR, v, azi, ele]))
 			_bank[Vector2i(azi, ele)] = streams
 	for i in VOICES:
@@ -54,11 +57,18 @@ static func snap(right_deg: float, up_deg: float) -> Vector2i:
 
 
 static func level_db(distance_m: float) -> float:
-	return maxf(-20.0 * log(maxf(distance_m, FULL_LEVEL_M) / FULL_LEVEL_M) / log(10.0), MIN_DB)
+	var spread := -20.0 * log(maxf(distance_m, FULL_LEVEL_M) / FULL_LEVEL_M) / log(10.0)
+	return spread - maxf(distance_m - FADE_FROM_M, 0.0) * 1.5
+
+
+static func audible(distance_m: float) -> bool:
+	return distance_m <= RANGE_M
 
 
 ## Play one footstep from a direction relative to the listener's facing.
 func play_relative(right_deg: float, up_deg: float, distance_m: float) -> void:
+	if not audible(distance_m):
+		return
 	var streams: Array = _bank[snap(right_deg, up_deg)]
 	var voice := _voices[_next_voice]
 	_next_voice = (_next_voice + 1) % VOICES

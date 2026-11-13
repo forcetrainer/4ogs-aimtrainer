@@ -8,3 +8,20 @@ game/.godot/
 *.tmp
 Thumbs.db
 .DS_Store
+
+# Raw asset downloads; only what is used gets copied into game/assets
+downloads/
+
+# Fab Standard License assets may not be redistributed as source files, so they
+# stay out of version control. Re-download from Fab (see game/assets/kit/README.txt).
+game/assets/kit/*.fbx
+game/assets/kit/*.png
+game/assets/kit/*.import
+
+# Mixamo files may not be redistributed as source files either.
+game/assets/enemy/*.fbx
+game/assets/enemy/*.import
+game/assets/enemy/*.png
+
+# Built game
+build/

@@ -36,6 +36,9 @@ func _init() -> void:
 	_test_cover()
 	_test_gun_audio()
 	_test_arena()
+	_test_tower()
+	_test_movement()
+	_test_hit_regions()
 	print("FAILED: %d" % _failures if _failures else "ALL TESTS PASSED")
 	quit(1 if _failures else 0)
 
@@ -298,8 +301,10 @@ func _test_spatial_steps() -> void:
 					"%s/step%d_azi_%d_ele_%d.wav" % [SpatialSteps.DIR, v, azi, ele]))
 	_check("every stored direction has its sounds", missing, 0, 0)
 	_check("step level near", SpatialSteps.level_db(2.0), 0.0, 1e-9)
-	_check("step level at double distance", SpatialSteps.level_db(10.0), -6.0206, 0.001)
-	_check("step level floor", SpatialSteps.level_db(5000.0), SpatialSteps.MIN_DB, 1e-9)
+	_check("step level at double distance", SpatialSteps.level_db(8.0), -6.0206, 0.001)
+	_check("step fades faster once it is far", SpatialSteps.level_db(16.0), -12.0412 - 10.5, 0.001)
+	_check("step heard at 15 m", float(SpatialSteps.audible(15.0)), 1.0, 0.0)
+	_check("step not heard at 20 m", float(SpatialSteps.audible(20.0)), 0.0, 0.0)
 
 
 func _test_session_check() -> void:
@@ -523,3 +528,190 @@ func _test_arena() -> void:
 	var row := RunLog.history_row("mixed", "optic", {"fov": 110.0, "sensitivity": 6.9, "dpi": 800.0},
 		20, 14, 1500.0, 1320.0, s, 1790000000)
 	_check("arena: the seed is saved with the run", float(row.ends_with(",777")), 1.0, 0.0)
+
+
+func _test_tower() -> void:
+	var eye := Vector3(0, 1.7, 0)
+	var pieces := []
+	Cover._add(pieces, "tower", 0.0, 20.0)
+	var tower: Dictionary = pieces[0]
+	_check("tower: its screen is up in the air", Cover.center(tower).y,
+		Cover.TOWER_DECK + tower.half.y, 1e-6)
+	_check("tower: someone on the ground behind it is visible",
+		float(Cover.blocked(pieces, eye, Vector3(0, 1.1, -24))), 0.0, 0.0)
+	var spot := Cover.peek(tower, 1.0)
+	_check("tower: the enemy stands at deck height", spot.stand_height, Cover.TOWER_DECK, 1e-6)
+	var d: float = spot.distance
+	var chest_y: float = Cover.TOWER_DECK + Target.aim_height_for("stand")
+	_check("tower: hidden behind the screen while waiting", float(Cover.blocked(pieces, eye,
+		Vector3(sin(deg_to_rad(spot.hidden_off)) * d, chest_y, -cos(deg_to_rad(spot.hidden_off)) * d))),
+		1.0, 0.0)
+	var out := deg_to_rad(spot.min_off)
+	_check("tower: visible once stepped out", float(Cover.blocked(pieces, eye,
+		Vector3(sin(out) * d, chest_y, -cos(out) * d))), 0.0, 0.0)
+	_check("tower: nobody is placed underneath it",
+		float(Cover.inside(pieces, Vector3(1.8, 0, -20.4), 0.3)), 1.0, 0.0)
+	var t: Node3D = Target.new()
+	t.setup("stand", 0.0, d, 150.0, 2.0)
+	t.setup_peek(0.0, 1.0, spot, 2.2)
+	for i in 400:
+		t.update(0.01)
+	_check("tower: the enemy is on the deck", t.position.y, Cover.TOWER_DECK, 1e-6)
+	_check("tower: it stays on the deck after stepping out",
+		float(absf(t.bearing) * PI / 180.0 * d < 2.0), 1.0, 0.0)
+	_check("tower: no pedestal is made for it", float(t.get("_platform") == null), 1.0, 0.0)
+	t.free()
+	var raised := 0
+	for step: Array in Config.load_json("res://drills/check.json").sequence:
+		raised += int(step[2])
+	_check("check: no pedestal targets left", raised, 0, 0)
+
+
+
+func _test_hit_regions() -> void:
+	var EnemyModel = load("res://scripts/enemy_model.gd")
+	if not EnemyModel.available():
+		print("ok   hit regions skipped: no figure installed")
+		return
+	# A sphere and a tube, checked against hand-worked answers.
+	_check("tube: straight at a sphere", EnemyModel.ray_tube(Vector3(0, 0, 5), Vector3(0, 0, -1),
+		Vector3.ZERO, Vector3.ZERO, 1.0), 4.0, 1e-6)
+	_check("tube: past a sphere", float(is_inf(EnemyModel.ray_tube(Vector3(2, 0, 5),
+		Vector3(0, 0, -1), Vector3.ZERO, Vector3.ZERO, 1.0))), 1.0, 0.0)
+	_check("tube: across an upright tube", EnemyModel.ray_tube(Vector3(0, 1, 5), Vector3(0, 0, -1),
+		Vector3.ZERO, Vector3(0, 2, 0), 0.5), 4.5, 1e-6)
+	_check("tube: above its end", float(is_inf(EnemyModel.ray_tube(Vector3(0, 3, 5),
+		Vector3(0, 0, -1), Vector3.ZERO, Vector3(0, 2, 0), 0.5))), 1.0, 0.0)
+	_check("tube: behind the shooter does not count", float(is_inf(EnemyModel.ray_tube(
+		Vector3(0, 0, 5), Vector3(0, 0, 1), Vector3.ZERO, Vector3.ZERO, 1.0))), 1.0, 0.0)
+	# The figure in its resting pose: standing, arms straight out to the sides.
+	var m: Node3D = EnemyModel.new()
+	var here := Transform3D.IDENTITY
+	var ahead := Vector3(0, 0, -1)
+	_check("regions: between the eyes is the head", m.hit(here, Vector3(0, 1.62, 5), ahead), Geo.HEAD, 0)
+	_check("regions: the chest is the torso", m.hit(here, Vector3(0, 1.2, 5), ahead), Geo.BODY, 0)
+	_check("regions: an outstretched forearm is an arm", m.hit(here, Vector3(0.55, 1.39, 5), ahead), Geo.ARM, 0)
+	_check("regions: the other arm too", m.hit(here, Vector3(-0.55, 1.39, 5), ahead), Geo.ARM, 0)
+	_check("regions: a shin is a leg", m.hit(here, Vector3(0.1, 0.3, 5), ahead), Geo.LEG, 0)
+	_check("regions: a thigh is a leg", m.hit(here, Vector3(-0.1, 0.7, 5), ahead), Geo.LEG, 0)
+	_check("regions: between the legs misses", m.hit(here, Vector3(0, 0.3, 5), ahead), Geo.MISS, 0)
+	_check("regions: under an arm misses", m.hit(here, Vector3(0.5, 1.1, 5), ahead), Geo.MISS, 0)
+	_check("regions: over the head misses", m.hit(here, Vector3(0, 1.9, 5), ahead), Geo.MISS, 0)
+	# Moving the owner moves the regions with it.
+	var moved := Transform3D(Basis.IDENTITY, Vector3(3, 0, 0))
+	_check("regions: they go where the enemy goes", m.hit(moved, Vector3(3, 1.2, 5), ahead), Geo.BODY, 0)
+	_check("regions: and leave where it was", m.hit(moved, Vector3(0, 1.2, 5), ahead), Geo.MISS, 0)
+	m.free()
+
+
+func _test_movement() -> void:
+	var EnemyModel = load("res://scripts/enemy_model.gd")
+	# The weights must be able to produce every pattern.
+	var seen := {}
+	for i in 600:
+		var t: Node3D = Target.new()
+		t.setup("stand", 0.0, 20.0, 150.0, 2.5, 0.0, true)
+		seen[t.pattern] = true
+		t.free()
+	_check("movement: every pattern turns up", seen.size(), Target.PATTERNS.size(), 0)
+
+	var holder: Node3D = Target.new()
+	holder.setup("stand", 0.0, 20.0, 150.0, 2.0)
+	holder.pattern = "hold"
+	for i in 300:
+		holder.update(0.01)
+	_check("movement: a holder stays put", holder.bearing, 0.0, 1e-9)
+	holder.free()
+
+	var ducker: Node3D = Target.new()
+	ducker.setup("stand", 0.0, 20.0, 150.0, 2.0)
+	ducker.pattern = "duck"
+	var crouched := 0
+	for i in 600:
+		ducker.update(0.01)
+		crouched += int(ducker.stance == "crouch")
+	_check("movement: a ducker spends time both up and down",
+		float(crouched > 60 and crouched < 540), 1.0, 0.0)
+	ducker.free()
+
+	# Roaming stays in the yard and goes in more than one direction.
+	var roamer: Node3D = Target.new()
+	roamer.setup("stand", 0.0, 20.0, 150.0, 2.0)
+	roamer.pattern = "roam"
+	var nearest := 20.0
+	var furthest := 20.0
+	for i in 6000:
+		roamer.update(0.01)
+		nearest = minf(nearest, roamer.distance)
+		furthest = maxf(furthest, roamer.distance)
+	_check("movement: a roamer keeps its distance", float(nearest > Target.ROAM_NEAR_M - 1.0), 1.0, 0.0)
+	_check("movement: a roamer stays in the yard", float(furthest < Target.ROAM_FAR_M + 1.0), 1.0, 0.0)
+	_check("movement: a roamer moves toward and away as well as sideways",
+		float(furthest - nearest > 3.0), 1.0, 0.0)
+	roamer.free()
+
+	# A straight run goes where it is sent and then stops running.
+	var runner: Node3D = Target.new()
+	runner.setup("stand", 0.0, 20.0, 150.0, 2.0)
+	runner.run_to(Vector3(6, 0, -8), "hold")
+	for i in 600:
+		runner.update(0.01)
+	_check("movement: a run ends where it was sent",
+		(Vector3(runner.position.x, 0, runner.position.z) - Vector3(6, 0, -8)).length(), 0.0, 0.01)
+	_check("movement: and then it holds", float(runner.pattern == "hold" and not runner.running()), 1.0, 0.0)
+	runner.free()
+
+	# Running to cover ends hidden behind it, then peeking out and back.
+	var pieces := []
+	Cover._add(pieces, "plates", 0.0, 15.0)
+	var cover := {"bearing": 0.0, "side": 1.0, "spot": Cover.peek(pieces[0], 1.0)}
+	var hider: Node3D = Target.new()
+	hider.setup("stand", 30.0, 18.0, 150.0, 2.0)
+	hider.run_to(Target.tucked_point(cover), "peek", cover, Target.SPRINT_SPEED)
+	_check("movement: heading for cover is allowed to hide", float(hider.may_hide()), 1.0, 0.0)
+	while hider.running():
+		hider.update(0.01)
+	var eye := Vector3(0, 1.7, 0)
+	_check("movement: it arrives out of sight", float(Cover.blocked(pieces, eye, hider.aim_point())), 1.0, 0.0)
+	var changes := 0
+	var was_out := false
+	for i in 1200:
+		hider.update(0.01)
+		if hider.emerged() != was_out:
+			changes += 1
+			was_out = hider.emerged()
+	_check("movement: and then peeks out more than once", float(changes >= 3), 1.0, 0.0)
+	hider.free()
+
+	# An enemy at cover told to move breaks for the next piece.
+	Cover._add(pieces, "tank", 40.0, 16.0)
+	var mover: Node3D = Target.new()
+	var spot := Cover.peek(pieces[0], 1.0)
+	mover.setup("stand", 0.0, spot.distance, 150.0, 2.0)
+	mover.setup_peek(0.0, 1.0, spot, 2.2, true)
+	mover.move_to_cover = {"bearing": 40.0, "side": -1.0, "spot": Cover.peek(pieces[1], -1.0)}
+	var ran := false
+	for i in 800:
+		mover.update(0.01)
+		ran = ran or mover.running()
+	_check("movement: it runs to the next cover", float(ran), 1.0, 0.0)
+	_check("movement: and ends up near it", float(absf(wrapf(mover.bearing - 40.0, -180.0, 180.0)) < 12.0), 1.0, 0.0)
+	mover.free()
+
+	# Eight directions: which animation a direction of travel picks.
+	if EnemyModel.available():
+		_check("8-way: toward the player", float(EnemyModel.move_state(false, 0.0, 2.0) == "walk_forward"), 1.0, 0.0)
+		_check("8-way: away", float(EnemyModel.move_state(false, 0.0, -2.0) == "walk_backward"), 1.0, 0.0)
+		_check("8-way: to its left", float(EnemyModel.move_state(false, 2.0, 0.0) == "walk_left"), 1.0, 0.0)
+		_check("8-way: to its right", float(EnemyModel.move_state(false, -2.0, 0.0) == "walk_right"), 1.0, 0.0)
+		_check("8-way: a diagonal", float(EnemyModel.move_state(false, 1.5, -1.5) == "walk_backward_left"), 1.0, 0.0)
+		_check("8-way: running", float(EnemyModel.move_state(false, -3.0, 3.0) == "run_forward_right"), 1.0, 0.0)
+		_check("8-way: sprinting", float(EnemyModel.move_state(false, 0.0, 5.8) == "sprint_forward"), 1.0, 0.0)
+		_check("8-way: crouched", float(EnemyModel.move_state(true, 0.0, -1.5) == "crouch_backward"), 1.0, 0.0)
+		var missing := 0
+		for gait: String in EnemyModel.GAITS:
+			for direction: String in EnemyModel.DIRECTIONS:
+				missing += int(not EnemyModel.supports("%s_%s" % [gait, direction]))
+		_check("8-way: all 32 moving animations are installed", missing, 0, 0)
+		_check("8-way: the walk was made for a walking pace",
+			float(EnemyModel.made_for("walk_left") > 1.2 and EnemyModel.made_for("walk_left") < 2.4), 1.0, 0.0)

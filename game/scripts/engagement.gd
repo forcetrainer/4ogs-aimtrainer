@@ -25,6 +25,7 @@ const Target = preload("res://scripts/target.gd")
 const World = preload("res://scripts/world.gd")
 const Cover = preload("res://scripts/cover.gd")
 const GunAudio = preload("res://scripts/gun_audio.gd")
+const SpatialSteps = preload("res://scripts/spatial_steps.gd")
 const Placement = preload("res://scripts/placement.gd")
 const WeaponView = preload("res://scripts/weapon_view.gd")
 const Hud = preload("res://scripts/hud.gd")
@@ -55,6 +56,8 @@ const MAX_ENEMY_TTK_MS := 5000.0
 # measured against. Nothing adapts and nothing shoots back.
 const CHECK_TIMEOUT_MS := 4000.0
 const CHECK_SEED := 20261112
+# Time between an enemy's footsteps at a walk.
+const STEP_USEC := 320_000
 # How long after coming into sight an enemy starts shooting back.
 const ENEMY_FIRE_DELAY_USEC := 250_000
 # Walking speed of an enemy stepping out from behind cover, in m/s.
@@ -79,6 +82,7 @@ var camera: Camera3D
 var weapon_view: WeaponView
 var hud: Hud
 var audio: GunAudio
+var steps: SpatialSteps
 var run_log := RunLog.new()
 
 var _sun_dir := Vector3.UP
@@ -133,6 +137,8 @@ func _ready() -> void:
 	hud.quit_pressed.connect(_leave)
 	audio = GunAudio.new()
 	add_child(audio)
+	steps = SpatialSteps.new()
+	add_child(steps)
 	_apply_settings()
 	if dev_show == "":
 		run_log.open()
@@ -240,6 +246,8 @@ func _new_arena() -> void:
 		for arg: String in OS.get_cmdline_user_args():
 			if arg.begins_with("--arena="):
 				_arena_seed = int(arg.trim_prefix("--arena="))
+			elif arg.begins_with("--yaw="):
+				aim.yaw_deg = float(arg.trim_prefix("--yaw="))
 	_cover = Cover.layout() if _arena_seed == 0 else Cover.generate(_arena_seed)
 	if _cover_node:
 		_cover_node.queue_free()
@@ -313,12 +321,27 @@ func _spawn_target(now: int, stack_index: int) -> Dictionary:
 	if peek.is_empty():
 		place = _open_place(spec)
 		t.setup(place.stance, place.bearing, place.distance, profile.target_health, strafe,
-			place.base)
+			place.base, true)
+		if t.pattern in Target.RUN_PATTERNS:
+			_plan_run(t)
 	else:
 		var piece: Dictionary = peek.piece
 		t.setup(Placement.weighted_pick(drill.stances), piece.bearing, peek.spot.distance,
 			profile.target_health, strafe)
-		t.setup_peek(piece.bearing, peek.side, peek.spot, PEEK_SPEED)
+		# What it does once it is out: peek and duck back, stand at the edge
+		# holding the angle, break for another piece of cover, or walk out
+		# into the open. Up on a platform there is only room for the first two.
+		var roll := randf()
+		var raised: bool = float(piece.get("lift", 0.0)) > 0.0
+		var peeks := roll < (0.6 if raised else 0.35)
+		var next := {}
+		if not raised and roll >= 0.6 and roll < 0.8:
+			next = _nearest_cover(Cover.away(piece) * float(piece.distance), piece)
+			peeks = not next.is_empty()
+		t.setup_peek(piece.bearing, peek.side, peek.spot, PEEK_SPEED, peeks)
+		t.move_to_cover = next
+		if raised or (not peeks and roll < 0.6):
+			t.pattern = "hold"
 	if _check:
 		randomize()
 	t.rec = {
@@ -358,8 +381,16 @@ func _mark_seen(t: Node3D, now: int, where := {}) -> void:
 	rec.flick_deg = rad_to_deg(aim.direction().angle_to((t.resting_aim_point() - EYE).normalized()))
 	rec.pre_ads = Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
 	if not where.in_view:
-		# Stand-in for a directional sound cue until audio is built.
-		hud.cue(rec.offset, now)
+		# Out of view: the only warning is sound. Close by, that is a
+		# footstep. Further off footsteps do not carry, so the enemy is
+		# heard because it opens fire at once (in the session check too,
+		# where the shots are only noise).
+		if SpatialSteps.audible(t.distance):
+			steps.play_at(t.position, EYE, aim.yaw_deg)
+			t.next_step_usec = now + STEP_USEC
+		else:
+			t.loud = true
+			t.next_fire_usec = now
 
 
 ## Place a target in the open where the player can see it: not inside a
@@ -389,12 +420,69 @@ func _pick_peek() -> Dictionary:
 		for side: float in [-1.0, 1.0]:
 			var spot := Cover.peek(piece, side)
 			var b := deg_to_rad(piece.bearing + side * float(spot.min_off))
-			var chest := Vector3(sin(b) * spot.distance, Target.aim_height_for("stand"),
-				-cos(b) * spot.distance)
+			var chest := Vector3(sin(b) * spot.distance,
+				float(spot.stand_height) + Target.aim_height_for("stand"), -cos(b) * spot.distance)
 			var seen_at := Placement.measure(chest, settings, aim, _current_hfov(), _aspect(), EYE)
 			if Placement.zone_matches(zone, seen_at):
 				options.append({"piece": piece, "side": side, "spot": spot})
 	return {} if options.is_empty() else options.pick_random()
+
+
+## Give an enemy in the open somewhere to run in a straight line: to a
+## piece of cover to hide behind, across the yard, away, or toward the
+## player. It never ends up somewhere the player cannot see it, except
+## behind the cover it was sent to.
+func _plan_run(t: Node3D) -> void:
+	var here := Vector3(t.position.x, 0.0, t.position.z)
+	var out := here.normalized()
+	var sideways := Vector3(-out.z, 0.0, out.x)
+	if t.pattern == "to_cover":
+		var cover := _nearest_cover(here, {})
+		if not cover.is_empty():
+			t.run_to(Target.tucked_point(cover), "peek", cover, Target.SPRINT_SPEED)
+			return
+		t.pattern = "cross"
+	for attempt in 6:
+		var dest := here
+		var speed: float = Target.RUN_SPEED if randf() < 0.6 else Target.SPRINT_SPEED
+		match t.pattern:
+			"cross":
+				dest = here + sideways * (1.0 if randf() < 0.5 else -1.0) * randf_range(9.0, 18.0)
+			"flee":
+				dest = out * minf(t.distance + randf_range(7.0, 14.0), Placement.MAX_DISTANCE - 1.0)
+				speed = Target.RUN_SPEED
+			"push":
+				dest = out * randf_range(5.0, 9.0)
+		if dest.distance_to(here) < 3.0 or dest.length() < 4.0:
+			continue
+		var chest := dest + Vector3(0.0, Target.aim_height_for("stand"), 0.0)
+		if not Cover.inside(_cover, dest, 0.7) and not Cover.blocked(_cover, EYE, chest):
+			t.run_to(dest, "hold" if t.pattern == "flee" else "strafe", {}, speed)
+			return
+	t.pattern = "strafe"
+
+
+## The nearest piece of ground-level cover an enemy at `from` could run to
+## and hide behind, as {"bearing", "side", "spot"}; {} if there is none
+## within reach. `not_this` is a piece to leave out (the one it is at).
+func _nearest_cover(from: Vector3, not_this: Dictionary) -> Dictionary:
+	var best := {}
+	var best_gap := INF
+	for piece: Dictionary in _cover:
+		if not piece.tall or float(piece.get("lift", 0.0)) > 0.0 or _cover_in_use(piece):
+			continue
+		if not not_this.is_empty() and is_equal_approx(piece.bearing, not_this.bearing) \
+				and is_equal_approx(piece.distance, not_this.distance):
+			continue
+		var gap := (Cover.away(piece) * float(piece.distance)).distance_to(from)
+		if gap < 5.0 or gap > 22.0 or gap >= best_gap:
+			continue
+		# Hide on the side of the piece it is coming from.
+		var from_bearing := rad_to_deg(atan2(from.x, -from.z))
+		var side := 1.0 if wrapf(from_bearing - float(piece.bearing), -180.0, 180.0) >= 0.0 else -1.0
+		best = {"bearing": float(piece.bearing), "side": side, "spot": Cover.peek(piece, side)}
+		best_gap = gap
+	return best
 
 
 func _cover_in_use(piece: Dictionary) -> bool:
@@ -413,15 +501,18 @@ func _ms_since(rec: Dictionary, now: int) -> float:
 	return (now - int(rec.t0)) / 1000.0
 
 
-func _remove_target(t: Node3D) -> void:
+func _remove_target(t: Node3D, killed := false) -> void:
 	_fight_recs.append(t.rec)
 	_targets.erase(t)
-	t.queue_free()
+	if killed:
+		t.die(t.rec.get("killed_by_headshot", false))
+	else:
+		t.queue_free()
 
 
 func _clear_targets() -> void:
 	for t: Node3D in _targets.duplicate():
-		_remove_target(t)
+		_remove_target(t, false)
 
 
 func _finish_fight(now: int, won: bool) -> void:
@@ -592,14 +683,19 @@ func _update_fight(now: int, delta: float) -> void:
 	var half := _current_hfov() / 2.0
 	for t: Node3D in _targets:
 		t.update(delta)
+		# Anything walking can be heard, including an enemy still behind
+		# cover on its way out: you can hear it before you can see it.
+		if t.moving() and now >= t.next_step_usec:
+			steps.play_at(t.position, EYE, aim.yaw_deg)
+			t.next_step_usec = now + (STEP_USEC * 3 / 2 if t.stance == "crouch" else STEP_USEC)
 		if not t.seen:
 			# Still behind cover: nothing is timed until it shows.
 			if t.emerged():
 				_mark_seen(t, now)
 			continue
-		if not t.from_cover() and Cover.blocked(_cover, EYE, t.aim_point()):
+		if not t.may_hide() and Cover.blocked(_cover, EYE, t.aim_point()):
 			t.undo_step()
-		if not _check and now >= t.next_fire_usec:
+		if (not _check or t.loud) and t.emerged() and now >= t.next_fire_usec:
 			# The enemy shoots back in short bursts, heard from where it is.
 			audio.enemy_shot(wrapf(t.bearing - aim.yaw_deg, -180.0, 180.0), t.distance)
 			if t.burst_left <= 0:
@@ -701,12 +797,17 @@ func _apply_hit(t: Node3D, kind: int, now: int) -> void:
 	if kind == Geo.HEAD:
 		rec.headshots += 1
 		damage *= weapon.headshot_multiplier
+	elif kind == Geo.ARM:
+		damage *= float(weapon.get("arm_multiplier", 1.0))
+	elif kind == Geo.LEG:
+		damage *= float(weapon.get("leg_multiplier", 1.0))
 	t.health -= damage
 	var killed: bool = t.health <= 0.0
 	hud.hit(now, killed)
 	if killed:
 		audio.kill(kind == Geo.HEAD)
+		rec["killed_by_headshot"] = kind == Geo.HEAD
 		rec.kill = _ms_since(rec, now)
-		_remove_target(t)
+		_remove_target(t, true)
 	else:
 		audio.hit(kind == Geo.HEAD)

@@ -3,9 +3,10 @@ extends RefCounted
 ## against the exact aim direction with no physics-tick delay.
 ## feet: world position of the target's feet. body_top: height of the torso
 ## above the feet in the current stance. head_center: world position of the head.
-## Returns MISS, BODY or HEAD.
+## Returns MISS, BODY or HEAD. (ARM and LEG are returned only by the hit
+## regions that follow an animated figure; see enemy_model.gd.)
 
-enum { MISS, BODY, HEAD }
+enum { MISS, BODY, HEAD, ARM, LEG }
 
 const BODY_RADIUS := 0.25
 const HEAD_RADIUS := 0.12
